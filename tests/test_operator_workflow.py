@@ -109,7 +109,7 @@ def test_persistent_operator_workflow_after_restarts(tmp_path: Path) -> None:
                 if location["id"] == artifact["location_id"]
             )
             assert expected_name in text
-            assert "Демонстрационная модель" in text
+            assert "Синтетические данные" in text
 
         manifest_index = next(
             index
