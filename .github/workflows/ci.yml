@@ -34,8 +34,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e '.[dev]'
 
-      - name: Статическая проверка
+      - name: Статическая проверка Python
         run: ruff check .
+
+      - name: Проверка JavaScript и сценариев установки
+        run: |
+          node --check src/weather_to_docx/static/app.js
+          for script in scripts/*.sh; do bash -n "$script"; done
 
       - name: Тесты
         run: pytest
@@ -43,8 +48,39 @@ jobs:
       - name: Проверка компиляции
         run: python -m compileall -q src
 
+      - name: Сборка wheel и проверка локального интерфейса
+        run: |
+          rm -rf dist/wheels
+          python -m pip wheel --no-deps . --wheel-dir dist/wheels
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+
+          wheels = list(Path("dist/wheels").glob("weather_to_docx-*.whl"))
+          assert len(wheels) == 1, wheels
+          with ZipFile(wheels[0]) as archive:
+              names = set(archive.namelist())
+          required = {
+              "weather_to_docx/static/index.html",
+              "weather_to_docx/static/styles.css",
+              "weather_to_docx/static/app.js",
+          }
+          missing = required - names
+          assert not missing, f"Статические файлы не вошли в wheel: {sorted(missing)}"
+          PY
+
       - name: Сформировать автономный пример
         run: weather-to-docx sample --output var/ci-sample --hours 24
+
+      - name: Собрать автономный комплект без GRIB-дополнения
+        if: matrix.python-version == '3.11'
+        env:
+          INCLUDE_GRIB: "0"
+          OUTPUT_DIR: dist/offline
+        run: |
+          bash scripts/build-offline-bundle.sh
+          compgen -G 'dist/offline/weather-to-docx-offline-*.tar.zst' >/dev/null
+          sha256sum -c dist/offline/*.tar.zst.sha256
 
       - name: Сохранить DOCX-пример
         if: matrix.python-version == '3.11'
