@@ -59,8 +59,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             name="static",
         )
 
-    @app.get("/", include_in_schema=False)
-    def operator_interface() -> FileResponse | HTMLResponse:
+    @app.get("/", include_in_schema=False, response_model=None)
+    def operator_interface() -> Response:
         index = static_dir / "index.html"
         if index.is_file():
             return FileResponse(index)
@@ -108,6 +108,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         limit: int = Query(default=1000, ge=1, le=10000),
     ) -> list[Location]:
         return locations.list(group=group, limit=limit)
+
+    @app.get(
+        "/api/v1/location-catalog/export",
+        response_model=list[Location],
+        tags=["locations"],
+    )
+    def export_locations() -> list[Location]:
+        return locations.list(limit=10000)
 
     @app.post(
         "/api/v1/locations",
@@ -172,14 +180,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    @app.get(
-        "/api/v1/locations/export",
-        response_model=list[Location],
-        tags=["locations"],
-    )
-    def export_locations() -> list[Location]:
-        return locations.list(limit=10000)
 
     @app.post(
         "/api/v1/jobs",
