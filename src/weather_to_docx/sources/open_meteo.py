@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import statistics
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, ClassVar
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -18,17 +18,14 @@ from weather_to_docx.domain.models import (
 from weather_to_docx.sources.base import ForecastSource, SourceDescriptor
 from weather_to_docx.utils.meteorology import haversine_km
 
-OPEN_METEO_HOURLY_PARAMETERS = (
+OPEN_METEO_CORE_PARAMETERS = (
     "temperature_2m",
     "relative_humidity_2m",
     "dew_point_2m",
     "apparent_temperature",
-    "precipitation_probability",
     "precipitation",
     "rain",
-    "showers",
     "snowfall",
-    "snow_depth",
     "weather_code",
     "pressure_msl",
     "surface_pressure",
@@ -36,10 +33,6 @@ OPEN_METEO_HOURLY_PARAMETERS = (
     "cloud_cover_low",
     "cloud_cover_mid",
     "cloud_cover_high",
-    "visibility",
-    "evapotranspiration",
-    "et0_fao_evapotranspiration",
-    "vapour_pressure_deficit",
     "wind_speed_10m",
     "wind_direction_10m",
     "wind_gusts_10m",
@@ -47,6 +40,18 @@ OPEN_METEO_HOURLY_PARAMETERS = (
     "direct_radiation",
     "diffuse_radiation",
     "sunshine_duration",
+    "cape",
+    "is_day",
+)
+
+OPEN_METEO_HOURLY_PARAMETERS = OPEN_METEO_CORE_PARAMETERS + (
+    "precipitation_probability",
+    "showers",
+    "snow_depth",
+    "visibility",
+    "evapotranspiration",
+    "et0_fao_evapotranspiration",
+    "vapour_pressure_deficit",
     "soil_temperature_0cm",
     "soil_temperature_6cm",
     "soil_temperature_18cm",
@@ -56,30 +61,38 @@ OPEN_METEO_HOURLY_PARAMETERS = (
     "soil_moisture_3_to_9cm",
     "soil_moisture_9_to_27cm",
     "soil_moisture_27_to_81cm",
-    "cape",
-    "is_day",
 )
 
 
-class OpenMeteoGfsSource(ForecastSource):
-    descriptor = SourceDescriptor(
-        source_id="open_meteo_gfs",
-        name="NOAA GFS через Open-Meteo",
-        provider="Open-Meteo / NOAA",
-        model="NOAA GFS",
-        horizon_days=16,
-        exact_cycle=False,
-        notes="Быстрый рабочий источник. Точный цикл GFS в стандартном ответе API не публикуется.",
-    )
+class OpenMeteoDeterministicSource(ForecastSource):
+    """Общий адаптер конкретной детерминированной модели Open-Meteo.
 
-    default_endpoint = "https://api.open-meteo.com/v1/gfs"
+    Модель всегда передаётся явно через ``models``. Это исключает незаметное
+    смешивание региональных и глобальных моделей в режимах ``best_match`` и
+    ``seamless``.
+    """
+
+    descriptor: ClassVar[SourceDescriptor]
+    default_endpoint: ClassVar[str] = "https://api.open-meteo.com/v1/forecast"
+    model_id: ClassVar[str]
+    hourly_parameters: ClassVar[tuple[str, ...]] = OPEN_METEO_CORE_PARAMETERS
+    product: ClassVar[str] = "hourly point forecast"
+    grid_type: ClassVar[str] = "regular latitude-longitude; point selection by Open-Meteo"
+    spatial_resolution: ClassVar[str | None] = None
+    licence: ClassVar[str] = "Условия Open-Meteo и лицензия исходного поставщика"
+    attribution: ClassVar[str]
+    interpolation_warning: ClassVar[str | None] = (
+        "Open-Meteo может приводить нативные сроки модели к почасовой сетке; "
+        "такие значения являются обработанной выдачей сервиса."
+    )
+    strict_source_hint: ClassVar[str | None] = None
 
     def __init__(
         self,
         *,
         timeout_seconds: float = 60,
         max_retries: int = 3,
-        user_agent: str = "weather-to-docx/0.1.0",
+        user_agent: str = "weather-to-docx/0.2.0",
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.timeout_seconds = timeout_seconds
@@ -95,12 +108,14 @@ class OpenMeteoGfsSource(ForecastSource):
     ) -> ForecastSeries:
         options = options or {}
         endpoint = str(options.get("endpoint", self.default_endpoint))
-        requested_parameters = tuple(options.get("hourly", OPEN_METEO_HOURLY_PARAMETERS))
+        requested_parameters = tuple(options.get("hourly", self.hourly_parameters))
         forecast_days = min(forecast_days, self.descriptor.horizon_days)
+        model_id = str(options.get("model", self.model_id))
         params: dict[str, Any] = {
             "latitude": location.latitude,
             "longitude": location.longitude,
             "hourly": ",".join(requested_parameters),
+            "models": model_id,
             "timezone": "UTC",
             "forecast_days": forecast_days,
             "temperature_unit": "celsius",
@@ -128,10 +143,12 @@ class OpenMeteoGfsSource(ForecastSource):
                 except (httpx.HTTPError, httpx.TimeoutException) as exc:
                     last_error = exc
                     if attempt == self.max_retries:
-                        raise RuntimeError(f"Open-Meteo недоступен после {attempt} попыток: {exc}") from exc
+                        raise RuntimeError(
+                            f"{self.descriptor.name} недоступен после {attempt} попыток: {exc}"
+                        ) from exc
                     await asyncio.sleep(min(2 ** (attempt - 1), 5))
             if response is None:
-                raise RuntimeError(f"Open-Meteo не вернул ответ: {last_error}")
+                raise RuntimeError(f"{self.descriptor.name} не вернул ответ: {last_error}")
             payload = response.json()
             if isinstance(payload, list):
                 if len(payload) != 1:
@@ -142,6 +159,7 @@ class OpenMeteoGfsSource(ForecastSource):
                 location=location,
                 retrieved_at_utc=datetime.now(UTC),
                 endpoint=endpoint,
+                model_id=model_id,
             )
         finally:
             if own_client:
@@ -154,7 +172,8 @@ class OpenMeteoGfsSource(ForecastSource):
         *,
         location: Location,
         retrieved_at_utc: datetime,
-        endpoint: str = default_endpoint,
+        endpoint: str | None = None,
+        model_id: str | None = None,
     ) -> ForecastSeries:
         hourly = payload.get("hourly") or {}
         hourly_units = payload.get("hourly_units") or {}
@@ -196,14 +215,7 @@ class OpenMeteoGfsSource(ForecastSource):
                 )
             )
 
-        step_hours = None
-        if len(parsed_times) > 1:
-            differences = [
-                (right - left).total_seconds() / 3600
-                for left, right in zip(parsed_times, parsed_times[1:], strict=False)
-            ]
-            step_hours = float(statistics.median(differences))
-
+        step_hours = _median_step_hours(parsed_times)
         grid_latitude = _optional_float(payload.get("latitude"))
         grid_longitude = _optional_float(payload.get("longitude"))
         grid_distance = None
@@ -215,35 +227,138 @@ class OpenMeteoGfsSource(ForecastSource):
                 grid_longitude,
             )
 
+        actual_endpoint = endpoint or cls.default_endpoint
+        actual_model_id = model_id or cls.model_id
         warnings = [
-            "Стандартный ответ Open-Meteo не содержит точного времени цикла GFS; "
-            "для строгой воспроизводимости используйте источник noaa_gfs_0p25."
+            "Стандартный ответ Open-Meteo не содержит надёжного времени исходного "
+            f"цикла {cls.descriptor.model}; в документе фиксируется время получения."
         ]
+        if cls.interpolation_warning:
+            warnings.append(cls.interpolation_warning)
+        if cls.strict_source_hint:
+            warnings.append(cls.strict_source_hint)
+
         return ForecastSeries(
             location=location,
             source=SourceMetadata(
                 source_id=cls.descriptor.source_id,
                 provider=cls.descriptor.provider,
                 model=cls.descriptor.model,
-                product="hourly point forecast",
+                product=cls.product,
                 cycle_time_utc=None,
                 retrieved_at_utc=retrieved_at_utc,
                 horizon_hours=round((parsed_times[-1] - parsed_times[0]).total_seconds() / 3600),
                 native_time_step_hours=step_hours,
-                grid_type="regular latitude-longitude; interpolated by Open-Meteo",
-                spatial_resolution="GFS 0.25°; выдача интерполирована сервисом",
+                grid_type=cls.grid_type,
+                spatial_resolution=cls.spatial_resolution,
                 grid_latitude=grid_latitude,
                 grid_longitude=grid_longitude,
                 grid_distance_km=grid_distance,
                 model_elevation_m=_optional_float(payload.get("elevation")),
-                licence="Условия Open-Meteo; исходные данные NOAA",
-                source_reference=endpoint,
-                attribution="Weather data by Open-Meteo; underlying model NOAA GFS",
+                licence=cls.licence,
+                source_reference=actual_endpoint,
+                attribution=cls.attribution,
+                adapter_version="0.2.0",
                 exact_cycle_known=False,
+                upstream_model_id=actual_model_id,
+                delivery_service="Open-Meteo",
             ),
             points=points,
             warnings=warnings,
         )
+
+
+class OpenMeteoGfsSource(OpenMeteoDeterministicSource):
+    descriptor = SourceDescriptor(
+        source_id="open_meteo_gfs",
+        name="NOAA GFS 0.25° через Open-Meteo",
+        provider="Open-Meteo / NOAA",
+        model="NOAA GFS 0.25°",
+        horizon_days=16,
+        exact_cycle=False,
+        notes="Быстрый резервный источник; модель задана явно как gfs025.",
+    )
+    default_endpoint = "https://api.open-meteo.com/v1/gfs"
+    model_id = "gfs025"
+    hourly_parameters = OPEN_METEO_HOURLY_PARAMETERS
+    spatial_resolution = "0.25°; выдача точки подготовлена Open-Meteo"
+    licence = "Условия Open-Meteo; исходные данные NOAA/NCEP"
+    attribution = "Weather data by Open-Meteo; underlying model NOAA GFS"
+    strict_source_hint = (
+        "Для строгой фиксации цикла и исходных GRIB2 используйте прямой источник noaa_gfs_0p25."
+    )
+
+
+class OpenMeteoEcmwfIfsSource(OpenMeteoDeterministicSource):
+    descriptor = SourceDescriptor(
+        source_id="open_meteo_ecmwf_ifs",
+        name="ECMWF IFS 0.25° Open Data через Open-Meteo",
+        provider="Open-Meteo / ECMWF",
+        model="ECMWF IFS 0.25° Open Data",
+        horizon_days=15,
+        exact_cycle=False,
+        notes="Независимый глобальный детерминированный прогноз ECMWF.",
+    )
+    default_endpoint = "https://api.open-meteo.com/v1/ecmwf"
+    model_id = "ecmwf_ifs025"
+    spatial_resolution = "0.25°; выдача точки подготовлена Open-Meteo"
+    licence = "ECMWF Open Data CC BY 4.0; условия Open-Meteo"
+    attribution = "ECMWF Open Data, delivered by Open-Meteo"
+
+
+class OpenMeteoEcmwfAifsSource(OpenMeteoDeterministicSource):
+    descriptor = SourceDescriptor(
+        source_id="open_meteo_ecmwf_aifs",
+        name="ECMWF AIFS 0.25° Single через Open-Meteo",
+        provider="Open-Meteo / ECMWF",
+        model="ECMWF AIFS 0.25° Single",
+        horizon_days=15,
+        exact_cycle=False,
+        notes="Глобальная модель машинного обучения ECMWF; не смешивается с IFS.",
+    )
+    default_endpoint = "https://api.open-meteo.com/v1/ecmwf"
+    model_id = "ecmwf_aifs025_single"
+    spatial_resolution = "0.25°; нативный шаг AIFS обработан Open-Meteo"
+    licence = "ECMWF Open Data CC BY 4.0; условия Open-Meteo"
+    attribution = "ECMWF AIFS Open Data, delivered by Open-Meteo"
+    interpolation_warning = (
+        "AIFS имеет более редкие нативные сроки; почасовые строки Open-Meteo являются "
+        "временной интерполяцией и не должны трактоваться как отдельные расчётные сроки модели."
+    )
+
+
+class OpenMeteoDwdIconGlobalSource(OpenMeteoDeterministicSource):
+    descriptor = SourceDescriptor(
+        source_id="open_meteo_dwd_icon_global",
+        name="DWD ICON Global через Open-Meteo",
+        provider="Open-Meteo / DWD",
+        model="DWD ICON Global",
+        horizon_days=8,
+        exact_cycle=False,
+        notes="Глобальная ICON задана явно; региональные ICON-EU/ICON-D2 не подмешиваются.",
+    )
+    default_endpoint = "https://api.open-meteo.com/v1/dwd-icon"
+    model_id = "dwd_icon_global"
+    spatial_resolution = "около 0.1° / 11 км; выдача точки подготовлена Open-Meteo"
+    licence = "DWD Open Data; условия Open-Meteo"
+    attribution = "DWD ICON Open Data, delivered by Open-Meteo"
+
+
+class OpenMeteoGemGdpsSource(OpenMeteoDeterministicSource):
+    descriptor = SourceDescriptor(
+        source_id="open_meteo_gem_gdps",
+        name="ECCC GEM Global (GDPS) через Open-Meteo",
+        provider="Open-Meteo / ECCC",
+        model="ECCC GEM Global (GDPS)",
+        horizon_days=10,
+        exact_cycle=False,
+        notes="Канадская глобальная детерминированная модель GDPS.",
+    )
+    default_endpoint = "https://api.open-meteo.com/v1/gem"
+    model_id = "cmc_gem_gdps"
+    spatial_resolution = "0.15° / около 15 км; выдача точки подготовлена Open-Meteo"
+    licence = "ECCC Open Data; условия Open-Meteo"
+    attribution = "Environment and Climate Change Canada GEM/GDPS, delivered by Open-Meteo"
 
 
 def _parse_open_meteo_time(value: str | int | float) -> datetime:
@@ -257,6 +372,16 @@ def _parse_open_meteo_time(value: str | int | float) -> datetime:
 
 def _indexed(value: Any, index: int) -> Any:
     return value[index] if isinstance(value, list) and index < len(value) else None
+
+
+def _median_step_hours(values: list[datetime]) -> float | None:
+    if len(values) < 2:
+        return None
+    differences = [
+        (right - left).total_seconds() / 3600
+        for left, right in zip(values, values[1:], strict=False)
+    ]
+    return float(statistics.median(differences))
 
 
 def _normalise_unit(value: str | None) -> str | None:
