@@ -7,11 +7,13 @@
 - выпуску Astra Linux;
 - архитектуре (`amd64`, `arm64`);
 - версии `glibc`;
-- версии Python;
+- **основной и дополнительной версии Python**;
 - источникам системных пакетов;
 - режиму защищённости, если он влияет на разрешённые пакеты.
 
-Копировать готовый `venv` с Ubuntu, Debian другой версии или macOS нельзя. Бинарные колёса `cryptography`, `Pillow` и `eccodes` должны собираться или скачиваться в совместимой среде.
+Копировать готовый `venv` с Ubuntu, Debian другой версии или macOS нельзя. Бинарные колёса `cryptography`, `Pillow`, `lxml`, `pydantic-core` и `eccodes` должны собираться или скачиваться в совместимой среде.
+
+Сборщик записывает в `build-info.json` точную пару `python_major_minor`, например `3.11`. Установщик принимает только совместимый интерпретатор. Wheelhouse, собранный для Python 3.11, не будет ошибочно установлен через Python 3.12.
 
 ## 2. Что содержит комплект
 
@@ -20,11 +22,13 @@ weather-to-docx-offline-<version>-<target>/
 ├── VERSION
 ├── build-info.json
 ├── README.md
+├── CHANGELOG.md
 ├── SHA256SUMS
 ├── SHA256SUMS.sig              # при включённой подписи GPG
 ├── wheelhouse/                 # приложение и Python-зависимости
 ├── apt-repository/             # необязательный локальный APT-репозиторий
 ├── runtime/                    # необязательный частный Python runtime
+├── sbom/cyclonedx.json
 ├── config/
 ├── examples/
 ├── docs/
@@ -52,14 +56,16 @@ sudo bash scripts/build-astra-apt-repository.sh dist/apt-repository
 ca-certificates zstd fonts-liberation2 libeccodes0 libeccodes-data
 ```
 
-Пример с явно выбранным Python из репозитория организации:
+Пример с явно выбранным Python:
 
 ```bash
 sudo APT_PACKAGES='python3.11 python3.11-venv ca-certificates zstd fonts-liberation2 libeccodes0 libeccodes-data' \
   bash scripts/build-astra-apt-repository.sh dist/apt-repository
 ```
 
-Сценарий скачивает `.deb`, формирует `Packages` и `Packages.gz`. Если в разрешённом репозитории Astra нет Python 3.11, используйте утверждённый частный runtime.
+Сценарий скачивает `.deb`, формирует `Packages`, `Packages.gz` и `requested-packages.txt`. При установке `apt-get` получает пакеты только из вложенного файлового репозитория.
+
+Если в разрешённом репозитории Astra нет Python 3.11, используйте утверждённый частный runtime.
 
 ## 4. Сборка Python-колёс и архива
 
@@ -74,6 +80,7 @@ TARGET_TAG=astra17-amd64          # имя целевой платформы
 INCLUDE_GRIB=1                    # включить Python-обвязку ecCodes
 APT_REPOSITORY=dist/apt-repository
 RUNTIME_DIR=/opt/python311        # необязательно
+PYTHON_BIN=python3.11             # интерпретатор сборки wheelhouse
 SIGNING_KEY='GPG_KEY_ID'          # необязательно
 OUTPUT_DIR=dist
 ```
@@ -85,21 +92,32 @@ TARGET_TAG=astra17-amd64 \
 INCLUDE_GRIB=1 \
 APT_REPOSITORY=dist/apt-repository \
 RUNTIME_DIR=/opt/python311 \
+PYTHON_BIN=python3.11 \
 SIGNING_KEY='release@example.org' \
   bash scripts/build-offline-bundle.sh
 ```
 
-Результат:
+Результат версии 0.2.0:
 
 ```text
-dist/weather-to-docx-offline-0.1.0-astra17-amd64.tar.zst
+dist/weather-to-docx-offline-0.2.0-astra17-amd64.tar.zst
+dist/weather-to-docx-offline-0.2.0-astra17-amd64.tar.zst.sha256
 ```
 
 ## 5. Проверка перед переносом
 
+Проверка внешней контрольной суммы:
+
 ```bash
-cd dist
-sha256sum weather-to-docx-offline-*.tar.zst
+sha256sum -c dist/weather-to-docx-offline-0.2.0-astra17-amd64.tar.zst.sha256
+```
+
+Проверка содержимого после распаковки:
+
+```bash
+tar --zstd -xf dist/weather-to-docx-offline-0.2.0-astra17-amd64.tar.zst
+cd weather-to-docx-offline-0.2.0-astra17-amd64
+sha256sum -c SHA256SUMS
 ```
 
 При использовании GPG:
@@ -108,38 +126,57 @@ sha256sum weather-to-docx-offline-*.tar.zst
 gpg --verify weather-to-docx-offline-*.tar.zst.asc weather-to-docx-offline-*.tar.zst
 ```
 
-Архив и его подпись переносятся в закрытый контур через разрешённый носитель.
+Архив, контрольная сумма и подпись переносятся в закрытый контур через разрешённый носитель.
 
 ## 6. Установка в закрытом контуре
 
 ```bash
-tar --zstd -xf weather-to-docx-offline-0.1.0-astra17-amd64.tar.zst
-cd weather-to-docx-offline-0.1.0-astra17-amd64
+tar --zstd -xf weather-to-docx-offline-0.2.0-astra17-amd64.tar.zst
+cd weather-to-docx-offline-0.2.0-astra17-amd64
 sudo ./install.sh
 ```
 
 Установщик:
 
-1. проверяет контрольные суммы содержимого;
-2. проверяет Astra Linux и архитектуру;
-3. при наличии устанавливает `.deb` только из вложенного APT-репозитория;
-4. создаёт пользователя `weatherdoc` без интерактивного входа;
-5. создаёт каталог новой версии;
-6. создаёт изолированный `venv`;
-7. устанавливает Python-пакеты только из `wheelhouse`;
-8. сохраняет базу и пользовательские данные;
-9. выполняет `weather-to-docx init` и диагностику;
+1. проверяет SHA-256 каждого файла комплекта;
+2. при наличии проверяет GPG-подпись `SHA256SUMS` доверенным keyring;
+3. проверяет Astra Linux и архитектуру;
+4. проверяет совместимость версии Python с wheelhouse;
+5. при наличии устанавливает `.deb` только из вложенного APT-репозитория;
+6. создаёт пользователя `weatherdoc` без интерактивного входа;
+7. создаёт каталог новой версии во временном месте;
+8. создаёт изолированный `venv` и выполняет `pip --no-index`;
+9. сохраняет базу и пользовательские данные;
 10. атомарно переключает `/opt/weather-to-docx/current`;
-11. устанавливает и перезапускает systemd-службы;
-12. при ошибке возвращает прежнюю версию.
+11. выполняет `weather-to-docx init` и глубокую диагностику от имени `weatherdoc`;
+12. устанавливает и перезапускает systemd-службы;
+13. при ошибке возвращает прежнюю версию и перезапускает старые службы.
 
-Для испытаний на Debian-подобной системе, не являющейся Astra, проверку можно явно отключить:
+### Явный выбор Python
+
+Обычно установщик находит версию из `build-info.json` автоматически. При нескольких интерпретаторах можно указать путь:
+
+```bash
+sudo WTD_PYTHON=/usr/bin/python3.11 ./install.sh
+```
+
+Версия должна точно совпадать с `python_major_minor` wheelhouse.
+
+### Испытание не на Astra Linux
+
+Для CI или отдельного Debian-стенда:
 
 ```bash
 sudo WTD_ALLOW_NON_ASTRA=1 ./install.sh
 ```
 
-В производственной установке так делать не следует.
+Отключение systemd допускается только для контейнера/CI:
+
+```bash
+sudo WTD_ALLOW_NON_ASTRA=1 WTD_SKIP_SYSTEMD=1 ./install.sh
+```
+
+В производственной Astra Linux эти обходы применять не следует.
 
 ## 7. Конфигурация
 
@@ -174,10 +211,18 @@ sudo systemctl status weather-to-docx-api weather-to-docx-worker
 curl -fsS http://127.0.0.1:8080/health
 ```
 
-Автономный DOCX:
+Интерфейс:
+
+```text
+http://127.0.0.1:8080/
+```
+
+Автономный DOCX без сетевых запросов:
 
 ```bash
-sudo -u weatherdoc /opt/weather-to-docx/current/venv/bin/weather-to-docx \
+sudo runuser -u weatherdoc -- env \
+  WTD_DATA_DIR=/var/lib/weather-to-docx \
+  /opt/weather-to-docx/current/venv/bin/weather-to-docx \
   sample --output /var/lib/weather-to-docx/documents/sample --hours 24
 ```
 
@@ -196,14 +241,18 @@ journalctl -u weather-to-docx-worker -n 200 --no-pager
 sudo ./upgrade.sh
 ```
 
-Данные не находятся внутри каталога релиза, поэтому не удаляются:
+Данные находятся вне каталога релиза и сохраняются:
 
 ```text
 /etc/weather-to-docx/
 /var/lib/weather-to-docx/
 ```
 
-Перед переключением создаётся резервная копия SQLite.
+Перед переключением создаётся архив SQLite в:
+
+```text
+/var/lib/weather-to-docx/backups/
+```
 
 ## 10. Откат
 
@@ -217,24 +266,26 @@ sudo /opt/weather-to-docx/current/bin/rollback-release
 sudo ./rollback.sh
 ```
 
-Откат меняет символические ссылки `current` и `previous` местами и перезапускает службы. База не откатывается автоматически, поскольку обратимость миграции данных должна оцениваться отдельно. Перед обновлением резервная копия находится в:
-
-```text
-/var/lib/weather-to-docx/backups/
-```
+Откат меняет ссылки `current` и `previous` местами и перезапускает службы. База автоматически не откатывается, поскольку обратимость миграции данных должна оцениваться отдельно.
 
 ## 11. Удаление
 
-Остановить приложение, сохранив данные:
+Удалить приложение, сохранив настройки и данные:
 
 ```bash
 sudo ./uninstall.sh
 ```
 
-Полное удаление, включая базу, документы, кэш и настройки:
+Полное удаление:
 
 ```bash
 sudo ./uninstall.sh --purge-data
+```
+
+Для CI без systemd:
+
+```bash
+sudo WTD_SKIP_SYSTEMD=1 ./uninstall.sh --purge-data
 ```
 
 ## 12. Полностью изолированные прогнозные данные
@@ -259,3 +310,19 @@ weather-to-docx generate-bundle \
 ```
 
 Закрытый сервер проверяет Ed25519-подпись манифеста и SHA-256 каждого нормализованного ряда.
+
+## 13. Что проверяет CI
+
+Для Python 3.11 CI выполняет реальный цикл:
+
+1. собирает wheelhouse;
+2. формирует `.tar.zst`;
+3. проверяет внешнюю и внутренние контрольные суммы;
+4. распаковывает комплект;
+5. устанавливает его в `/opt`, `/etc` и `/var/lib` без Интернета;
+6. запускает установленную CLI;
+7. проверяет наличие локального интерфейса в wheel;
+8. формирует DOCX от имени `weatherdoc`;
+9. выполняет полное удаление.
+
+Это не заменяет приёмку на целевой Astra Linux, но исключает повреждённые архивы, несовместимую версию Python, сетевой `pip`, ошибки путей и неработающий установленный entrypoint.
