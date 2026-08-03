@@ -24,6 +24,9 @@ with open(sys.argv[1], "rb") as stream:
     print(tomllib.load(stream)["project"]["version"])
 PY
 )
+PYTHON_MAJOR_MINOR=$(
+  "$PYTHON_BIN" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
+)
 ARCH=$(dpkg --print-architecture 2>/dev/null || uname -m)
 BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 BUNDLE_NAME="weather-to-docx-offline-${VERSION}-${TARGET_TAG}"
@@ -39,7 +42,7 @@ if [[ "$INCLUDE_GRIB" == "1" ]]; then
   touch "$STAGE/wheelhouse/grib.enabled"
 fi
 
-echo "==> Сборка wheelhouse для $TARGET_TAG"
+echo "==> Сборка wheelhouse для $TARGET_TAG, Python $PYTHON_MAJOR_MINOR"
 "$PYTHON_BIN" -m pip wheel \
   --disable-pip-version-check \
   --wheel-dir "$STAGE/wheelhouse" \
@@ -82,6 +85,7 @@ cat > "$STAGE/build-info.json" <<JSON
   "architecture": "$ARCH",
   "built_at_utc": "$BUILD_TIME",
   "python": "$("$PYTHON_BIN" -VV 2>&1 | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g')",
+  "python_major_minor": "$PYTHON_MAJOR_MINOR",
   "grib_python_enabled": $([[ "$INCLUDE_GRIB" == "1" ]] && echo true || echo false),
   "apt_repository_included": $([[ -d "$STAGE/apt-repository" ]] && echo true || echo false),
   "private_runtime_included": $([[ -d "$STAGE/runtime" ]] && echo true || echo false)
