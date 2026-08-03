@@ -103,6 +103,7 @@ jobs:
           sudo env \
             WTD_ALLOW_NON_ASTRA=1 \
             WTD_SKIP_SYSTEMD=1 \
+            WTD_PYTHON="$pythonLocation/bin/python" \
             "$install_dir/install.sh"
 
           test "$(/opt/weather-to-docx/current/venv/bin/weather-to-docx --version)" = "0.2.0"
