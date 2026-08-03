@@ -13,6 +13,8 @@ DATA_DIR=/var/lib/$PROJECT
 BACKUP_DIR=$DATA_DIR/backups
 BUNDLE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 APP_VERSION=$(tr -d '[:space:]' < "$BUNDLE_DIR/VERSION")
+EXPECTED_PYTHON_MAJOR_MINOR=$(sed -n 's/.*"python_major_minor"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$BUNDLE_DIR/build-info.json" | head -1)
+EXPECTED_PYTHON_MAJOR_MINOR=${EXPECTED_PYTHON_MAJOR_MINOR:-3.11}
 RELEASE_DIR=$RELEASES_DIR/$APP_VERSION
 STAGE_DIR=$RELEASES_DIR/.install-$APP_VERSION-$$
 OLD_TARGET=""
@@ -121,24 +123,25 @@ select_python() {
   local candidates=()
   [[ -n ${WTD_PYTHON:-} ]] && candidates+=("$WTD_PYTHON")
   while IFS= read -r candidate; do candidates+=("$candidate"); done < <(
-    find "$OPT_ROOT/runtime" -type f \( -name python3.11 -o -name python3 \) -perm -0100 2>/dev/null | sort
+    find "$OPT_ROOT/runtime" -type f \( -name "python$EXPECTED_PYTHON_MAJOR_MINOR" -o -name python3 -o -name python \) -perm -0100 2>/dev/null | sort
   )
-  command -v python3.11 >/dev/null 2>&1 && candidates+=("$(command -v python3.11)")
+  command -v "python$EXPECTED_PYTHON_MAJOR_MINOR" >/dev/null 2>&1 \
+    && candidates+=("$(command -v "python$EXPECTED_PYTHON_MAJOR_MINOR")")
   command -v python3 >/dev/null 2>&1 && candidates+=("$(command -v python3)")
+  command -v python >/dev/null 2>&1 && candidates+=("$(command -v python)")
 
-  local candidate
+  local candidate candidate_version
   for candidate in "${candidates[@]}"; do
     [[ -x "$candidate" ]] || continue
-    if "$candidate" - <<'PY' >/dev/null 2>&1
-import sys
-raise SystemExit(0 if sys.version_info >= (3, 11) else 1)
-PY
-    then
+    candidate_version=$(
+      "$candidate" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || true
+    )
+    if [[ "$candidate_version" == "$EXPECTED_PYTHON_MAJOR_MINOR" ]]; then
       printf '%s\n' "$candidate"
       return 0
     fi
   done
-  fatal "не найден совместимый Python 3.11+; добавьте python3.11 в APT-комплект или задайте RUNTIME_DIR при сборке"
+  fatal "не найден Python $EXPECTED_PYTHON_MAJOR_MINOR, совместимый с wheelhouse; добавьте его в локальный APT-комплект, включите RUNTIME_DIR при сборке либо задайте WTD_PYTHON"
 }
 
 create_account_and_directories() {
@@ -182,7 +185,7 @@ install_release() {
 
   local python_bin
   python_bin=$(select_python)
-  echo "==> Python: $python_bin"
+  echo "==> Python: $python_bin ($EXPECTED_PYTHON_MAJOR_MINOR)"
   "$python_bin" -m venv --copies "$STAGE_DIR/venv"
   local package_spec="weather-to-docx==$APP_VERSION"
   if [[ -f "$BUNDLE_DIR/wheelhouse/grib.enabled" ]]; then
