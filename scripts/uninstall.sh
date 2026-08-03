@@ -9,7 +9,11 @@ set -Eeuo pipefail
 PURGE=0
 [[ ${1:-} == "--purge-data" ]] && PURGE=1
 
-if command -v systemctl >/dev/null 2>&1; then
+systemd_enabled() {
+  [[ ${WTD_SKIP_SYSTEMD:-0} != 1 ]] && command -v systemctl >/dev/null 2>&1
+}
+
+if systemd_enabled; then
   systemctl disable --now weather-to-docx-api.service weather-to-docx-worker.service >/dev/null 2>&1 || true
   rm -f /etc/systemd/system/weather-to-docx-api.service /etc/systemd/system/weather-to-docx-worker.service
   systemctl daemon-reload

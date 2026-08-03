@@ -24,7 +24,7 @@ if [[ -n "$CURRENT_TARGET" && -d "$CURRENT_TARGET" ]]; then
   mv -Tf "$PREVIOUS.new" "$PREVIOUS"
 fi
 
-if command -v systemctl >/dev/null 2>&1; then
+if [[ ${WTD_SKIP_SYSTEMD:-0} != 1 ]] && command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload
   systemctl restart weather-to-docx-api.service weather-to-docx-worker.service
 fi

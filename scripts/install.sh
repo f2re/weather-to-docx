@@ -12,11 +12,14 @@ ETC_DIR=/etc/$PROJECT
 DATA_DIR=/var/lib/$PROJECT
 BACKUP_DIR=$DATA_DIR/backups
 BUNDLE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-VERSION=$(tr -d '[:space:]' < "$BUNDLE_DIR/VERSION")
-RELEASE_DIR=$RELEASES_DIR/$VERSION
-STAGE_DIR=$RELEASES_DIR/.install-$VERSION-$$
+APP_VERSION=$(tr -d '[:space:]' < "$BUNDLE_DIR/VERSION")
+EXPECTED_PYTHON_MAJOR_MINOR=$(sed -n 's/.*"python_major_minor"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$BUNDLE_DIR/build-info.json" | head -1)
+EXPECTED_PYTHON_MAJOR_MINOR=${EXPECTED_PYTHON_MAJOR_MINOR:-3.11}
+RELEASE_DIR=$RELEASES_DIR/$APP_VERSION
+STAGE_DIR=$RELEASES_DIR/.install-$APP_VERSION-$$
 OLD_TARGET=""
 SWITCHED=0
+RELEASE_CREATED=0
 SERVICES=(weather-to-docx-api.service weather-to-docx-worker.service)
 
 fatal() {
@@ -28,16 +31,27 @@ require_root() {
   [[ ${EUID} -eq 0 ]] || fatal "установка должна выполняться от root"
 }
 
+systemd_enabled() {
+  [[ ${WTD_SKIP_SYSTEMD:-0} != 1 ]] && command -v systemctl >/dev/null 2>&1
+}
+
 restore_on_error() {
   code=$?
   trap - ERR
   echo "Установка прервана, выполняется безопасное восстановление." >&2
-  if [[ $SWITCHED -eq 1 && -n "$OLD_TARGET" && -d "$OLD_TARGET" ]]; then
-    ln -sfn "$OLD_TARGET" "$CURRENT_LINK.restore"
-    mv -Tf "$CURRENT_LINK.restore" "$CURRENT_LINK"
+  if [[ $SWITCHED -eq 1 ]]; then
+    if [[ -n "$OLD_TARGET" && -d "$OLD_TARGET" ]]; then
+      ln -sfn "$OLD_TARGET" "$CURRENT_LINK.restore"
+      mv -Tf "$CURRENT_LINK.restore" "$CURRENT_LINK"
+    else
+      rm -f "$CURRENT_LINK"
+    fi
   fi
   rm -rf "$STAGE_DIR"
-  if command -v systemctl >/dev/null 2>&1; then
+  if [[ $RELEASE_CREATED -eq 1 && -d "$RELEASE_DIR" && "$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)" != "$RELEASE_DIR" ]]; then
+    rm -rf "$RELEASE_DIR"
+  fi
+  if systemd_enabled; then
     systemctl daemon-reload || true
     for service in "${SERVICES[@]}"; do
       systemctl restart "$service" >/dev/null 2>&1 || true
@@ -117,24 +131,25 @@ select_python() {
   local candidates=()
   [[ -n ${WTD_PYTHON:-} ]] && candidates+=("$WTD_PYTHON")
   while IFS= read -r candidate; do candidates+=("$candidate"); done < <(
-    find "$OPT_ROOT/runtime" -type f \( -name python3.11 -o -name python3 \) -perm -0100 2>/dev/null | sort
+    find "$OPT_ROOT/runtime" -type f \( -name "python$EXPECTED_PYTHON_MAJOR_MINOR" -o -name python3 -o -name python \) -perm -0100 2>/dev/null | sort
   )
-  command -v python3.11 >/dev/null 2>&1 && candidates+=("$(command -v python3.11)")
+  command -v "python$EXPECTED_PYTHON_MAJOR_MINOR" >/dev/null 2>&1 \
+    && candidates+=("$(command -v "python$EXPECTED_PYTHON_MAJOR_MINOR")")
   command -v python3 >/dev/null 2>&1 && candidates+=("$(command -v python3)")
+  command -v python >/dev/null 2>&1 && candidates+=("$(command -v python)")
 
-  local candidate
+  local candidate candidate_version
   for candidate in "${candidates[@]}"; do
     [[ -x "$candidate" ]] || continue
-    if "$candidate" - <<'PY' >/dev/null 2>&1
-import sys
-raise SystemExit(0 if sys.version_info >= (3, 11) else 1)
-PY
-    then
+    candidate_version=$(
+      "$candidate" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || true
+    )
+    if [[ "$candidate_version" == "$EXPECTED_PYTHON_MAJOR_MINOR" ]]; then
       printf '%s\n' "$candidate"
       return 0
     fi
   done
-  fatal "не найден совместимый Python 3.11+; добавьте python3.11 в APT-комплект или задайте RUNTIME_DIR при сборке"
+  fatal "не найден Python $EXPECTED_PYTHON_MAJOR_MINOR, совместимый с wheelhouse; добавьте его в локальный APT-комплект, включите RUNTIME_DIR при сборке либо задайте WTD_PYTHON"
 }
 
 create_account_and_directories() {
@@ -150,7 +165,7 @@ create_account_and_directories() {
 }
 
 stop_services_and_backup() {
-  if command -v systemctl >/dev/null 2>&1; then
+  if systemd_enabled; then
     for service in "${SERVICES[@]}"; do
       systemctl stop "$service" >/dev/null 2>&1 || true
     done
@@ -168,35 +183,68 @@ stop_services_and_backup() {
 install_release() {
   [[ -d "$BUNDLE_DIR/wheelhouse" ]] || fatal "отсутствует wheelhouse"
   if [[ -e "$RELEASE_DIR" ]]; then
-    [[ ${WTD_REINSTALL:-0} == 1 ]] || fatal "релиз $VERSION уже существует; для осознанной переустановки задайте WTD_REINSTALL=1"
+    [[ ${WTD_REINSTALL:-0} == 1 ]] || fatal "релиз $APP_VERSION уже существует; для осознанной переустановки задайте WTD_REINSTALL=1"
     [[ "$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)" != "$RELEASE_DIR" ]] \
       || fatal "нельзя удалить текущий релиз при переустановке"
     rm -rf "$RELEASE_DIR"
   fi
+
   rm -rf "$STAGE_DIR"
-  mkdir -p "$STAGE_DIR/share" "$STAGE_DIR/bin"
+  install -d -m 0755 "$STAGE_DIR"
 
   local python_bin
   python_bin=$(select_python)
-  echo "==> Python: $python_bin"
+  echo "==> Python: $python_bin ($EXPECTED_PYTHON_MAJOR_MINOR)"
   "$python_bin" -m venv --copies "$STAGE_DIR/venv"
-  local package_spec="weather-to-docx==$VERSION"
+
+  local package_spec="weather-to-docx==$APP_VERSION"
   if [[ -f "$BUNDLE_DIR/wheelhouse/grib.enabled" ]]; then
-    package_spec="weather-to-docx[grib]==$VERSION"
+    package_spec="weather-to-docx[grib]==$APP_VERSION"
   fi
   "$STAGE_DIR/venv/bin/python" -m pip install \
     --no-index --disable-pip-version-check \
     --find-links "$BUNDLE_DIR/wheelhouse" \
     "$package_spec"
 
+  # Создаём служебные каталоги после pip. Это делает сборку устойчивой к
+  # особенностям venv и гарантирует наличие целей непосредственно перед cp.
+  install -d -m 0755 "$STAGE_DIR/share" "$STAGE_DIR/bin"
+  for required in \
+    "$BUNDLE_DIR/docs" \
+    "$BUNDLE_DIR/config" \
+    "$BUNDLE_DIR/examples" \
+    "$BUNDLE_DIR/README.md" \
+    "$BUNDLE_DIR/CHANGELOG.md" \
+    "$BUNDLE_DIR/THIRD_PARTY_NOTICES.md" \
+    "$BUNDLE_DIR/rollback.sh"; do
+    [[ -e "$required" ]] || fatal "в комплекте отсутствует обязательный файл: $required"
+  done
+
   cp -a "$BUNDLE_DIR/docs" "$BUNDLE_DIR/config" "$BUNDLE_DIR/examples" "$STAGE_DIR/share/"
   cp "$BUNDLE_DIR/README.md" "$BUNDLE_DIR/CHANGELOG.md" "$BUNDLE_DIR/THIRD_PARTY_NOTICES.md" "$STAGE_DIR/share/"
   cp "$BUNDLE_DIR/rollback.sh" "$STAGE_DIR/bin/rollback-release"
   chmod 0755 "$STAGE_DIR/bin/rollback-release"
-  printf '%s\n' "$VERSION" > "$STAGE_DIR/VERSION"
+  printf '%s\n' "$APP_VERSION" > "$STAGE_DIR/VERSION"
+
+  "$STAGE_DIR/venv/bin/python" - <<'PY'
+from importlib.resources import files
+import weather_to_docx
+
+assert weather_to_docx.__version__
+static = files("weather_to_docx").joinpath("static")
+for name in ("index.html", "styles.css", "app.js"):
+    if not static.joinpath(name).is_file():
+        raise SystemExit(f"В установленном wheel отсутствует static/{name}")
+PY
+  [[ -x "$STAGE_DIR/venv/bin/weather-to-docx" ]] \
+    || fatal "в установленном wheel отсутствует исполняемая команда weather-to-docx"
+  [[ -d "$STAGE_DIR/share/docs" && -d "$STAGE_DIR/share/config" && -d "$STAGE_DIR/share/examples" ]] \
+    || fatal "не сформирован служебный каталог релиза"
+
   chown -R root:root "$STAGE_DIR"
   chmod -R go-w "$STAGE_DIR"
   mv "$STAGE_DIR" "$RELEASE_DIR"
+  RELEASE_CREATED=1
 }
 
 install_configuration() {
@@ -220,8 +268,8 @@ switch_release() {
 }
 
 install_services() {
-  if ! command -v systemctl >/dev/null 2>&1; then
-    echo "Предупреждение: systemd не найден; службы не установлены." >&2
+  if ! systemd_enabled; then
+    echo "==> Установка systemd-служб пропущена (WTD_SKIP_SYSTEMD=1 или systemctl недоступен)"
     return 0
   fi
   install -m 0644 "$BUNDLE_DIR/systemd/weather-to-docx-api.service" /etc/systemd/system/
@@ -241,7 +289,7 @@ initialise_and_validate() {
 }
 
 start_services() {
-  if command -v systemctl >/dev/null 2>&1; then
+  if systemd_enabled; then
     systemctl restart weather-to-docx-api.service weather-to-docx-worker.service
   fi
 }
@@ -261,7 +309,7 @@ initialise_and_validate
 start_services
 trap - ERR
 
-echo "==> Weather to DOCX $VERSION установлен"
+echo "==> Weather to DOCX $APP_VERSION установлен"
 echo "    Текущий релиз: $CURRENT_LINK -> $(readlink -f "$CURRENT_LINK")"
 echo "    Данные: $DATA_DIR"
 echo "    Настройки: $ETC_DIR/weather-to-docx.env"
