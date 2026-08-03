@@ -24,7 +24,9 @@ class Settings(BaseSettings):
 
     http_timeout_seconds: float = Field(default=60, gt=0, le=600)
     http_max_retries: int = Field(default=3, ge=1, le=10)
-    http_user_agent: str = "weather-to-docx/0.1.0 (+https://github.com/f2re/weather-to-docx)"
+    http_user_agent: str = (
+        "weather-to-docx/0.2.0 (+https://github.com/f2re/weather-to-docx)"
+    )
 
     require_bundle_signature: bool = False
     bundle_public_key: Path | None = None
@@ -35,7 +37,9 @@ class Settings(BaseSettings):
     def normalize_log_level(cls, value: str) -> str:
         value = value.upper()
         if value not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
-            raise ValueError("Допустимые уровни журнала: DEBUG, INFO, WARNING, ERROR, CRITICAL")
+            raise ValueError(
+                "Допустимые уровни журнала: DEBUG, INFO, WARNING, ERROR, CRITICAL"
+            )
         return value
 
     @model_validator(mode="after")
@@ -52,7 +56,9 @@ class Settings(BaseSettings):
             else self.data_dir / "documents"
         )
         self.cache_dir = (
-            self.cache_dir.expanduser().resolve() if self.cache_dir else self.data_dir / "cache"
+            self.cache_dir.expanduser().resolve()
+            if self.cache_dir
+            else self.data_dir / "cache"
         )
         self.incoming_dir = (
             self.incoming_dir.expanduser().resolve()
