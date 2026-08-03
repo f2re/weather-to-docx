@@ -188,13 +188,15 @@ install_release() {
       || fatal "нельзя удалить текущий релиз при переустановке"
     rm -rf "$RELEASE_DIR"
   fi
+
   rm -rf "$STAGE_DIR"
-  mkdir -p "$STAGE_DIR/share" "$STAGE_DIR/bin"
+  install -d -m 0755 "$STAGE_DIR"
 
   local python_bin
   python_bin=$(select_python)
   echo "==> Python: $python_bin ($EXPECTED_PYTHON_MAJOR_MINOR)"
   "$python_bin" -m venv --copies "$STAGE_DIR/venv"
+
   local package_spec="weather-to-docx==$APP_VERSION"
   if [[ -f "$BUNDLE_DIR/wheelhouse/grib.enabled" ]]; then
     package_spec="weather-to-docx[grib]==$APP_VERSION"
@@ -204,11 +206,41 @@ install_release() {
     --find-links "$BUNDLE_DIR/wheelhouse" \
     "$package_spec"
 
+  # Создаём служебные каталоги после pip. Это делает сборку устойчивой к
+  # особенностям venv и гарантирует наличие целей непосредственно перед cp.
+  install -d -m 0755 "$STAGE_DIR/share" "$STAGE_DIR/bin"
+  for required in \
+    "$BUNDLE_DIR/docs" \
+    "$BUNDLE_DIR/config" \
+    "$BUNDLE_DIR/examples" \
+    "$BUNDLE_DIR/README.md" \
+    "$BUNDLE_DIR/CHANGELOG.md" \
+    "$BUNDLE_DIR/THIRD_PARTY_NOTICES.md" \
+    "$BUNDLE_DIR/rollback.sh"; do
+    [[ -e "$required" ]] || fatal "в комплекте отсутствует обязательный файл: $required"
+  done
+
   cp -a "$BUNDLE_DIR/docs" "$BUNDLE_DIR/config" "$BUNDLE_DIR/examples" "$STAGE_DIR/share/"
   cp "$BUNDLE_DIR/README.md" "$BUNDLE_DIR/CHANGELOG.md" "$BUNDLE_DIR/THIRD_PARTY_NOTICES.md" "$STAGE_DIR/share/"
   cp "$BUNDLE_DIR/rollback.sh" "$STAGE_DIR/bin/rollback-release"
   chmod 0755 "$STAGE_DIR/bin/rollback-release"
   printf '%s\n' "$APP_VERSION" > "$STAGE_DIR/VERSION"
+
+  "$STAGE_DIR/venv/bin/python" - <<'PY'
+from importlib.resources import files
+import weather_to_docx
+
+assert weather_to_docx.__version__
+static = files("weather_to_docx").joinpath("static")
+for name in ("index.html", "styles.css", "app.js"):
+    if not static.joinpath(name).is_file():
+        raise SystemExit(f"В установленном wheel отсутствует static/{name}")
+PY
+  [[ -x "$STAGE_DIR/venv/bin/weather-to-docx" ]] \
+    || fatal "в установленном wheel отсутствует исполняемая команда weather-to-docx"
+  [[ -d "$STAGE_DIR/share/docs" && -d "$STAGE_DIR/share/config" && -d "$STAGE_DIR/share/examples" ]] \
+    || fatal "не сформирован служебный каталог релиза"
+
   chown -R root:root "$STAGE_DIR"
   chmod -R go-w "$STAGE_DIR"
   mv "$STAGE_DIR" "$RELEASE_DIR"
