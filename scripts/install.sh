@@ -28,6 +28,10 @@ require_root() {
   [[ ${EUID} -eq 0 ]] || fatal "установка должна выполняться от root"
 }
 
+systemd_enabled() {
+  [[ ${WTD_SKIP_SYSTEMD:-0} != 1 ]] && command -v systemctl >/dev/null 2>&1
+}
+
 restore_on_error() {
   code=$?
   trap - ERR
@@ -37,7 +41,7 @@ restore_on_error() {
     mv -Tf "$CURRENT_LINK.restore" "$CURRENT_LINK"
   fi
   rm -rf "$STAGE_DIR"
-  if command -v systemctl >/dev/null 2>&1; then
+  if systemd_enabled; then
     systemctl daemon-reload || true
     for service in "${SERVICES[@]}"; do
       systemctl restart "$service" >/dev/null 2>&1 || true
@@ -150,7 +154,7 @@ create_account_and_directories() {
 }
 
 stop_services_and_backup() {
-  if command -v systemctl >/dev/null 2>&1; then
+  if systemd_enabled; then
     for service in "${SERVICES[@]}"; do
       systemctl stop "$service" >/dev/null 2>&1 || true
     done
@@ -220,8 +224,8 @@ switch_release() {
 }
 
 install_services() {
-  if ! command -v systemctl >/dev/null 2>&1; then
-    echo "Предупреждение: systemd не найден; службы не установлены." >&2
+  if ! systemd_enabled; then
+    echo "==> Установка systemd-служб пропущена (WTD_SKIP_SYSTEMD=1 или systemctl недоступен)"
     return 0
   fi
   install -m 0644 "$BUNDLE_DIR/systemd/weather-to-docx-api.service" /etc/systemd/system/
@@ -241,7 +245,7 @@ initialise_and_validate() {
 }
 
 start_services() {
-  if command -v systemctl >/dev/null 2>&1; then
+  if systemd_enabled; then
     systemctl restart weather-to-docx-api.service weather-to-docx-worker.service
   fi
 }
