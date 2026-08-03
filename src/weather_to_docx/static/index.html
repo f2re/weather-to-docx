@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>Weather to DOCX</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">W</div>
+        <div>
+          <h1>Weather to DOCX</h1>
+          <p>Пакетное формирование метеорологических документов</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <div id="healthBadge" class="status-chip status-neutral">Проверка системы…</div>
+        <button id="refreshAll" class="button button-secondary" type="button">Обновить</button>
+        <a class="button button-ghost" href="/docs" target="_blank" rel="noreferrer">API</a>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="panel panel-wide" aria-labelledby="systemHeading">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Состояние</p>
+            <h2 id="systemHeading">Готовность системы</h2>
+          </div>
+        </div>
+        <div id="diagnostics" class="diagnostic-grid" aria-live="polite">
+          <div class="metric-card skeleton"></div>
+          <div class="metric-card skeleton"></div>
+          <div class="metric-card skeleton"></div>
+          <div class="metric-card skeleton"></div>
+        </div>
+      </section>
+
+      <section class="panel locations-panel" aria-labelledby="locationsHeading">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Шаг 1</p>
+            <h2 id="locationsHeading">Координаты</h2>
+            <p class="panel-subtitle">Выберите одну или несколько точек для пакетной генерации.</p>
+          </div>
+          <div class="inline-actions">
+            <button id="selectAllLocations" class="button button-ghost" type="button">Выбрать все</button>
+            <button id="exportLocations" class="button button-ghost" type="button">Экспорт JSON</button>
+          </div>
+        </div>
+
+        <form id="locationForm" class="form-grid location-form" autocomplete="off">
+          <input id="editingLocationId" type="hidden">
+          <label>
+            <span>Название</span>
+            <input id="locationName" name="name" required maxlength="250" placeholder="Основной объект">
+          </label>
+          <label>
+            <span>Идентификатор</span>
+            <input id="locationId" name="id" required maxlength="120" placeholder="main-object">
+          </label>
+          <label>
+            <span>Широта</span>
+            <input id="locationLatitude" name="latitude" required type="number" min="-90" max="90" step="0.000001" placeholder="59.938600">
+          </label>
+          <label>
+            <span>Долгота</span>
+            <input id="locationLongitude" name="longitude" required type="number" min="-180" max="180" step="0.000001" placeholder="30.314100">
+          </label>
+          <label>
+            <span>Высота, м</span>
+            <input id="locationElevation" name="elevation" type="number" min="-500" max="9000" step="0.1" placeholder="12">
+          </label>
+          <label>
+            <span>Часовой пояс</span>
+            <input id="locationTimezone" name="timezone" required value="Europe/Moscow" placeholder="Europe/Moscow">
+          </label>
+          <label>
+            <span>Группа</span>
+            <input id="locationGroup" name="group" maxlength="250" placeholder="Объекты северо-запада">
+          </label>
+          <div class="form-actions">
+            <button id="saveLocation" class="button button-primary" type="submit">Сохранить точку</button>
+            <button id="cancelLocationEdit" class="button button-secondary hidden" type="button">Отмена</button>
+          </div>
+        </form>
+
+        <details class="import-box">
+          <summary>Массовый импорт координат</summary>
+          <p>Поддерживается JSON-массив либо объект с полем <code>locations</code>. Проверка выполняется до записи в базу.</p>
+          <div class="inline-actions">
+            <label class="file-button">
+              <span>Выбрать JSON</span>
+              <input id="importLocationsFile" type="file" accept="application/json,.json">
+            </label>
+            <label class="checkbox-row">
+              <input id="replaceLocations" type="checkbox">
+              <span>Обновлять совпадающие идентификаторы</span>
+            </label>
+          </div>
+        </details>
+
+        <div class="table-shell">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th class="select-column"><span class="visually-hidden">Выбор</span></th>
+                <th>Точка</th>
+                <th>Координаты</th>
+                <th>Часовой пояс</th>
+                <th>Группа</th>
+                <th class="actions-column">Действия</th>
+              </tr>
+            </thead>
+            <tbody id="locationsBody">
+              <tr><td colspan="6" class="empty-state">Загрузка координат…</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel sources-panel" aria-labelledby="sourcesHeading">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Шаг 2</p>
+            <h2 id="sourcesHeading">Прогностические модели</h2>
+            <p class="panel-subtitle">Каждая выбранная модель будет оформлена отдельной секцией с двумя таблицами.</p>
+          </div>
+          <div class="inline-actions">
+            <button id="recommendedSources" class="button button-secondary" type="button">Рекомендуемый набор</button>
+            <button id="clearSources" class="button button-ghost" type="button">Снять выбор</button>
+          </div>
+        </div>
+        <div id="sourcesList" class="source-grid">
+          <div class="source-card skeleton"></div>
+          <div class="source-card skeleton"></div>
+          <div class="source-card skeleton"></div>
+        </div>
+      </section>
+
+      <section class="panel generation-panel" aria-labelledby="generationHeading">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Шаг 3</p>
+            <h2 id="generationHeading">Параметры документа</h2>
+            <p class="panel-subtitle">Настройки сохраняются только в этом браузере и не меняют системную конфигурацию.</p>
+          </div>
+        </div>
+
+        <form id="generationForm" class="form-grid generation-form">
+          <label class="span-two">
+            <span>Название задания</span>
+            <input id="batchName" maxlength="200" placeholder="Прогноз для объектов на текущую дату">
+          </label>
+          <label class="span-two">
+            <span>Заголовок документа</span>
+            <input id="documentTitle" value="Метеорологический прогноз">
+          </label>
+          <label>
+            <span>Формат страницы</span>
+            <select id="pageSize">
+              <option value="A3" selected>A3, альбомная</option>
+              <option value="A4">A4, альбомная</option>
+            </select>
+          </label>
+          <label>
+            <span>Шаг обзорной таблицы, ч</span>
+            <input id="summaryInterval" type="number" min="1" max="24" value="3">
+          </label>
+          <label>
+            <span>Шаг после 120 ч, ч</span>
+            <input id="extendedSummaryInterval" type="number" min="1" max="24" value="6">
+          </label>
+          <label>
+            <span>Организация</span>
+            <input id="organisation" placeholder="Наименование организации">
+          </label>
+          <label>
+            <span>Подготовил</span>
+            <input id="preparedBy" placeholder="Подразделение или специалист">
+          </label>
+          <label class="checkbox-card">
+            <input id="includeDetailed" type="checkbox" checked>
+            <span>
+              <strong>Подробная таблица</strong>
+              <small>Все сроки и оперативные группы параметров.</small>
+            </span>
+          </label>
+          <label class="checkbox-card">
+            <input id="includeAllParameters" type="checkbox" checked>
+            <span>
+              <strong>Все параметры</strong>
+              <small>Ансамблевые статистики, уровни и дополнительные поля.</small>
+            </span>
+          </label>
+        </form>
+
+        <div class="launch-bar">
+          <div>
+            <strong id="selectionSummary">Не выбраны координаты и модели</strong>
+            <p>Задание попадёт в SQLite-очередь и будет обработано службой worker.</p>
+          </div>
+          <button id="createJob" class="button button-primary button-large" type="button">Сформировать документы</button>
+        </div>
+      </section>
+
+      <section class="panel panel-wide jobs-panel" aria-labelledby="jobsHeading">
+        <div class="panel-header">
+          <div>
+            <p class="eyebrow">Результаты</p>
+            <h2 id="jobsHeading">Очередь и документы</h2>
+            <p class="panel-subtitle">Список обновляется автоматически. Ошибка одной модели или точки не блокирует остальные результаты.</p>
+          </div>
+          <button id="refreshJobs" class="button button-secondary" type="button">Обновить очередь</button>
+        </div>
+        <div id="jobsList" class="jobs-list" aria-live="polite">
+          <div class="empty-state">Загрузка заданий…</div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
