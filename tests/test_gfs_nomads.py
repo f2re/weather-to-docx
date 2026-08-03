@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
+
 from weather_to_docx.domain.models import Location
 from weather_to_docx.sources.gfs_nomads import GfsNomadsSource, GfsRun
 

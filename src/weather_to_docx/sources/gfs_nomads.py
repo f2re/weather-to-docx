@@ -112,10 +112,7 @@ class GfsNomadsSource(ForecastSource):
             point.weather_code = derive_weather_code(point)
 
         sample = self._first_grid_metadata(files[0][1], location)
-        if hourly_to_120:
-            native_step = 1 if max_hours <= 120 else None
-        else:
-            native_step = 3
+        native_step = (1 if max_hours <= 120 else None) if hourly_to_120 else 3
         return ForecastSeries(
             location=location,
             source=SourceMetadata(

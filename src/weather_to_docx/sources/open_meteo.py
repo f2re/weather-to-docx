@@ -18,7 +18,6 @@ from weather_to_docx.domain.models import (
 from weather_to_docx.sources.base import ForecastSource, SourceDescriptor
 from weather_to_docx.utils.meteorology import haversine_km
 
-
 OPEN_METEO_HOURLY_PARAMETERS = (
     "temperature_2m",
     "relative_humidity_2m",

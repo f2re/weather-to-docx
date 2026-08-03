@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Iterable
 
 from docx import Document
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
@@ -29,10 +29,15 @@ from weather_to_docx.document.styles import (
     set_table_fixed_layout,
 )
 from weather_to_docx.document.weather_rules import weather_presentation
-from weather_to_docx.domain.models import DocumentOptions, ForecastPoint, ForecastSeries, Location, QualityFlag
+from weather_to_docx.domain.models import (
+    DocumentOptions,
+    ForecastPoint,
+    ForecastSeries,
+    Location,
+    QualityFlag,
+)
 from weather_to_docx.domain.parameters import definition
 from weather_to_docx.utils.meteorology import wind_rumb
-
 
 QUALITY_MARKERS = {
     QualityFlag.INTERPOLATED: "≈",

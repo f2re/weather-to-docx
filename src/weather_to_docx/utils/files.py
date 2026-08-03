@@ -4,7 +4,6 @@ import hashlib
 import re
 from pathlib import Path
 
-
 _UNSAFE_FILENAME = re.compile(r"[^A-Za-z0-9А-Яа-яЁё._-]+")
 
 

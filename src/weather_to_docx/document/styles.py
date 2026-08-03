@@ -6,8 +6,7 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
 from docx.shared import Mm, Pt
-from docx.table import _Cell, _Row, Table
-
+from docx.table import Table, _Cell, _Row
 
 DARK_BLUE = "1F4E78"
 MID_BLUE = "D9EAF7"

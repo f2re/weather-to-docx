@@ -3,7 +3,13 @@ from __future__ import annotations
 import asyncio
 from pathlib import Path
 
-from weather_to_docx.domain.models import BatchRequest, DocumentOptions, JobStatus, Location, SourceRequest
+from weather_to_docx.domain.models import (
+    BatchRequest,
+    DocumentOptions,
+    JobStatus,
+    Location,
+    SourceRequest,
+)
 from weather_to_docx.services.batch import ForecastBatchService
 from weather_to_docx.settings import Settings
 from weather_to_docx.storage.jobs import JobRepository

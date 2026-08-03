@@ -7,7 +7,6 @@ from pathlib import Path
 from weather_to_docx.domain.models import Location
 from weather_to_docx.sources.open_meteo import OpenMeteoGfsSource
 
-
 FIXTURE = Path(__file__).parent / "fixtures" / "open_meteo_gfs.json"
 
 

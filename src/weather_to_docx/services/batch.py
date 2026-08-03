@@ -37,7 +37,7 @@ class ForecastBatchService:
         order: dict[tuple[str, str], int] = {
             (location.id, source.source_id): index
             for index, (location, source) in enumerate(
-                (pair for location in request.locations for pair in ((location, source) for source in request.sources))
+                pair for location in request.locations for pair in ((location, source) for source in request.sources)
             )
         }
         semaphore = asyncio.Semaphore(6)
