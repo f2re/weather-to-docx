@@ -1,0 +1,29 @@
+{
+  "batch_name": "api_example",
+  "locations": [
+    {
+      "id": "spb-office",
+      "name": "Санкт-Петербург, объект 1",
+      "latitude": 59.9386,
+      "longitude": 30.3141,
+      "elevation_m": 12,
+      "timezone": "Europe/Moscow"
+    }
+  ],
+  "sources": [
+    {
+      "source_id": "open_meteo_gfs",
+      "forecast_days": 7,
+      "options": {}
+    }
+  ],
+  "document": {
+    "title": "Метеорологический прогноз",
+    "page_size": "A3",
+    "summary_interval_hours": 3,
+    "extended_summary_interval_hours": 6,
+    "summary_switch_hour": 120,
+    "include_detailed_table": true,
+    "language": "ru"
+  }
+}
