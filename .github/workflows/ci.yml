@@ -132,6 +132,18 @@ jobs:
 
           test -n "$(find /var/lib/weather-to-docx/documents/install-smoke -type f -name '*.docx' -print -quit)"
 
+          original_release=$(readlink -f /opt/weather-to-docx/current)
+          smoke_previous=/opt/weather-to-docx/releases/0.1.99-smoke
+          sudo cp -a "$original_release" "$smoke_previous"
+          echo 0.1.99-smoke | sudo tee "$smoke_previous/VERSION" >/dev/null
+          sudo ln -sfn "$smoke_previous" /opt/weather-to-docx/previous
+          sudo env WTD_SKIP_SYSTEMD=1 "$original_release/bin/rollback-release"
+          test "$(readlink -f /opt/weather-to-docx/current)" = "$smoke_previous"
+          sudo env WTD_SKIP_SYSTEMD=1 /opt/weather-to-docx/current/bin/rollback-release
+          test "$(readlink -f /opt/weather-to-docx/current)" = "$original_release"
+          sudo rm -f /opt/weather-to-docx/previous
+          sudo rm -rf "$smoke_previous"
+
           sudo env WTD_SKIP_SYSTEMD=1 "$install_dir/uninstall.sh" --purge-data
           test ! -e /opt/weather-to-docx
           test ! -e /var/lib/weather-to-docx
