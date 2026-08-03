@@ -16,7 +16,6 @@ from weather_to_docx.document.styles import (
     DANGER,
     DARK_BLUE,
     LIGHT_BLUE,
-    LIGHT_GREY,
     MID_BLUE,
     WARNING,
     WHITE,
@@ -46,6 +45,68 @@ QUALITY_MARKERS = {
     QualityFlag.STALE: "!",
     QualityFlag.SUSPECT: "?",
     QualityFlag.MISSING: "—",
+}
+
+REPRESENTED_CODES = {
+    "temperature_2m",
+    "apparent_temperature",
+    "dew_point_2m",
+    "relative_humidity_2m",
+    "pressure_msl",
+    "surface_pressure",
+    "wind_speed_10m",
+    "wind_direction_10m",
+    "wind_gusts_10m",
+    "precipitation",
+    "rain",
+    "showers",
+    "convective_precipitation",
+    "precipitation_probability",
+    "snowfall",
+    "snow_depth",
+    "cloud_cover",
+    "cloud_cover_low",
+    "cloud_cover_mid",
+    "cloud_cover_high",
+    "visibility",
+    "cape",
+    "cin",
+    "vapour_pressure_deficit",
+    "shortwave_radiation",
+    "direct_radiation",
+    "diffuse_radiation",
+    "sunshine_duration",
+    "soil_temperature_0cm",
+    "soil_temperature_6cm",
+    "soil_temperature_18cm",
+    "soil_temperature_54cm",
+    "soil_moisture_0_to_1cm",
+    "soil_moisture_1_to_3cm",
+    "soil_moisture_3_to_9cm",
+    "soil_moisture_9_to_27cm",
+    "soil_moisture_27_to_81cm",
+    "et0_fao_evapotranspiration",
+    "evapotranspiration",
+    "boundary_layer_height",
+}
+
+_SHORT_PARAMETER_NAMES = {
+    "ensemble_member_count": "Члены N",
+    "temperature_2m_spread": "T σ",
+    "temperature_2m_p10": "T p10",
+    "temperature_2m_p90": "T p90",
+    "precipitation_spread": "Осадки σ",
+    "precipitation_p10": "Осадки p10",
+    "precipitation_p90": "Осадки p90",
+    "pressure_msl_spread": "Pmsl σ",
+    "pressure_msl_p10": "Pmsl p10",
+    "pressure_msl_p90": "Pmsl p90",
+    "wind_speed_10m_spread": "Ветер σ",
+    "wind_speed_10m_p10": "Ветер p10",
+    "wind_speed_10m_p90": "Ветер p90",
+    "wind_gusts_10m_spread": "Порывы σ",
+    "wind_gusts_10m_p10": "Порывы p10",
+    "wind_gusts_10m_p90": "Порывы p90",
 }
 
 
@@ -83,13 +144,21 @@ class DocumentGenerator:
         return output_path
 
     @staticmethod
-    def _configure_properties(document: Document, location: Location, options: DocumentOptions) -> None:
+    def _configure_properties(
+        document: Document,
+        location: Location,
+        options: DocumentOptions,
+    ) -> None:
         properties = document.core_properties
         properties.title = f"{options.title}: {location.name}"
         properties.subject = "Автоматически сформированный метеорологический прогноз"
         properties.author = options.prepared_by or "weather-to-docx"
-        properties.keywords = "погода, прогноз, GFS, DOCX, метеорология"
-        properties.comments = "Сформировано системой weather-to-docx без макросов и внешних ресурсов."
+        properties.keywords = (
+            "погода, прогноз, DOCX, метеорология, GFS, GEFS, ECMWF, AIFS, ICON, GDPS"
+        )
+        properties.comments = (
+            "Сформировано системой weather-to-docx без макросов и внешних ресурсов."
+        )
 
     def _add_header(
         self,
@@ -122,25 +191,40 @@ class DocumentGenerator:
         set_table_fixed_layout(table)
         values = [
             ("Координаты", f"{location.latitude:.5f}, {location.longitude:.5f}"),
-            ("Высота", f"{location.elevation_m:.0f} м" if location.elevation_m is not None else "не задана"),
+            (
+                "Высота",
+                f"{location.elevation_m:.0f} м"
+                if location.elevation_m is not None
+                else "не задана",
+            ),
             ("Часовой пояс", location.timezone),
             ("Сформировано", datetime.now(UTC).strftime("%d.%m.%Y %H:%M UTC")),
             ("Источники", ", ".join(forecast.source.source_id for forecast in series)),
-            ("Количество рядов", str(len(series))),
+            ("Количество моделей", str(len(series))),
         ]
         for index, (label, value) in enumerate(values):
             row = index // 2
             column = (index % 2) * 2
-            set_cell_text(table.cell(row, column), label, bold=True, align=WD_ALIGN_PARAGRAPH.LEFT)
+            set_cell_text(
+                table.cell(row, column),
+                label,
+                bold=True,
+                align=WD_ALIGN_PARAGRAPH.LEFT,
+            )
             set_cell_shading(table.cell(row, column), MID_BLUE)
-            set_cell_text(table.cell(row, column + 1), value, align=WD_ALIGN_PARAGRAPH.LEFT)
+            set_cell_text(
+                table.cell(row, column + 1),
+                value,
+                align=WD_ALIGN_PARAGRAPH.LEFT,
+            )
 
         warning = document.add_paragraph()
         warning.paragraph_format.space_before = Pt(5)
         warning.paragraph_format.space_after = Pt(7)
         warning_run = warning.add_run(
-            "Прогноз является расчётной информацией. Перед принятием критически важных решений "
-            "необходимо учитывать наблюдения, предупреждения уполномоченной метеослужбы и неопределённость модели."
+            "Прогноз является расчётной информацией. Перед принятием критически важных "
+            "решений необходимо учитывать наблюдения, официальные предупреждения и "
+            "неопределённость прогностических моделей."
         )
         warning_run.bold = True
         warning_run.font.size = Pt(8.5)
@@ -155,7 +239,7 @@ class DocumentGenerator:
         heading = document.add_heading(level=1)
         heading.add_run(f"{source.provider} — {source.model}")
 
-        metadata = document.add_table(rows=3, cols=4)
+        metadata = document.add_table(rows=4, cols=4)
         metadata.style = "Table Grid"
         metadata.alignment = WD_TABLE_ALIGNMENT.LEFT
         set_table_fixed_layout(metadata)
@@ -164,38 +248,81 @@ class DocumentGenerator:
             if source.cycle_time_utc
             else "не указан поставщиком"
         )
+        upstream_model = getattr(source, "upstream_model_id", None)
+        ensemble_count = getattr(source, "ensemble_member_count", None)
+        product_text = source.product
+        if ensemble_count:
+            product_text = f"{product_text}; членов: {ensemble_count}"
         pairs = [
             ("Источник", source.source_id),
+            ("Модель поставщика", upstream_model or source.model),
             ("Цикл", cycle),
-            ("Получено", source.retrieved_at_utc.astimezone(UTC).strftime("%d.%m.%Y %H:%M UTC")),
-            ("Горизонт", f"{source.horizon_hours} ч" if source.horizon_hours is not None else "—"),
-            ("Шаг", f"{source.native_time_step_hours:g} ч" if source.native_time_step_hours else "переменный"),
-            ("Сетка", " / ".join(filter(None, (source.spatial_resolution, source.grid_type))) or "—"),
+            (
+                "Получено",
+                source.retrieved_at_utc.astimezone(UTC).strftime("%d.%m.%Y %H:%M UTC"),
+            ),
+            (
+                "Горизонт",
+                f"{source.horizon_hours} ч"
+                if source.horizon_hours is not None
+                else "—",
+            ),
+            (
+                "Шаг выдачи",
+                f"{source.native_time_step_hours:g} ч"
+                if source.native_time_step_hours
+                else "переменный",
+            ),
+            (
+                "Сетка",
+                " / ".join(
+                    filter(None, (source.spatial_resolution, source.grid_type))
+                )
+                or "—",
+            ),
+            ("Продукт", product_text),
         ]
         for index, (label, value) in enumerate(pairs):
             row = index // 2
             column = (index % 2) * 2
-            set_cell_text(metadata.cell(row, column), label, bold=True, align=WD_ALIGN_PARAGRAPH.LEFT)
+            set_cell_text(
+                metadata.cell(row, column),
+                label,
+                bold=True,
+                align=WD_ALIGN_PARAGRAPH.LEFT,
+            )
             set_cell_shading(metadata.cell(row, column), MID_BLUE)
-            set_cell_text(metadata.cell(row, column + 1), value, align=WD_ALIGN_PARAGRAPH.LEFT)
+            set_cell_text(
+                metadata.cell(row, column + 1),
+                value,
+                align=WD_ALIGN_PARAGRAPH.LEFT,
+            )
 
         document.add_heading("1. Наглядный прогноз", level=2)
         self._add_summary_table(document, forecast, options)
 
         if options.include_detailed_table:
-            document.add_heading("2. Подробный почасовой метеорологический отчёт", level=2)
-            self._add_detailed_table(document, forecast)
+            document.add_heading(
+                "2. Подробный метеорологический отчёт по срокам",
+                level=2,
+            )
+            self._add_detailed_table(document, forecast, options)
 
         notes = list(forecast.warnings)
         if source.grid_distance_km is not None:
-            notes.append(f"Расстояние до ближайшего модельного узла: {source.grid_distance_km:.1f} км.")
+            notes.append(
+                f"Расстояние до ближайшего модельного узла: {source.grid_distance_km:.1f} км."
+            )
         if source.attribution:
             notes.append(f"Атрибуция: {source.attribution}.")
         if source.licence:
             notes.append(f"Условия использования: {source.licence}.")
         if source.source_reference:
             notes.append(f"Технический источник: {source.source_reference}.")
-        notes.append("Обозначения качества: ≈ интерполяция; * расчётное значение; † исправлено контролем качества; ! устаревшее; ? сомнительное.")
+        notes.append(
+            "Обозначения качества: ≈ интерполяция; * расчётное значение; "
+            "† исправлено контролем качества; ! устаревшее; ? сомнительное."
+        )
 
         for text in notes:
             paragraph = document.add_paragraph(style=None)
@@ -248,20 +375,66 @@ class DocumentGenerator:
                 set_cell_shading(cell, row_fill)
                 cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
 
-            set_cell_text(row.cells[0], point.valid_time_local.strftime("%d.%m.%Y\n%H:%M"), size=7.5)
-            self._set_icon_cell(row.cells[1], presentation.icon_key, presentation.description)
-            set_cell_text(row.cells[2], self._value(point, "temperature_2m", with_unit=True), size=8, bold=True)
-            set_cell_text(row.cells[3], self._value(point, "apparent_temperature", with_unit=True), size=8)
-            set_cell_text(row.cells[4], self._value(point, "precipitation", with_unit=True), size=8)
-            set_cell_text(row.cells[5], self._value(point, "precipitation_probability", with_unit=True), size=8)
+            set_cell_text(
+                row.cells[0],
+                point.valid_time_local.strftime("%d.%m.%Y\n%H:%M"),
+                size=7.5,
+            )
+            self._set_icon_cell(
+                row.cells[1],
+                presentation.icon_key,
+                presentation.description,
+            )
+            set_cell_text(
+                row.cells[2],
+                self._value(point, "temperature_2m", with_unit=True),
+                size=8,
+                bold=True,
+            )
+            set_cell_text(
+                row.cells[3],
+                self._value(point, "apparent_temperature", with_unit=True),
+                size=8,
+            )
+            set_cell_text(
+                row.cells[4],
+                self._value(point, "precipitation", with_unit=True),
+                size=8,
+            )
+            set_cell_text(
+                row.cells[5],
+                self._value(point, "precipitation_probability", with_unit=True),
+                size=8,
+            )
             set_cell_text(row.cells[6], self._wind_text(point), size=7.5)
-            set_cell_text(row.cells[7], self._value(point, "wind_gusts_10m", with_unit=True), size=8)
-            set_cell_text(row.cells[8], self._value(point, "pressure_msl", with_unit=True), size=8)
-            set_cell_text(row.cells[9], self._value(point, "cloud_cover", with_unit=True), size=8)
+            set_cell_text(
+                row.cells[7],
+                self._value(point, "wind_gusts_10m", with_unit=True),
+                size=8,
+            )
+            set_cell_text(
+                row.cells[8],
+                self._value(point, "pressure_msl", with_unit=True),
+                size=8,
+            )
+            set_cell_text(
+                row.cells[9],
+                self._value(point, "cloud_cover", with_unit=True),
+                size=8,
+            )
             self._apply_hazard_shading(row.cells, point)
 
-    def _add_detailed_table(self, document: Document, forecast: ForecastSeries) -> None:
-        headers = (
+    def _add_detailed_table(
+        self,
+        document: Document,
+        forecast: ForecastSeries,
+        options: DocumentOptions,
+    ) -> None:
+        include_additional = bool(
+            getattr(options, "include_all_parameters", True)
+            and self._has_additional_parameters(forecast)
+        )
+        headers = [
             "Дата и время",
             "Срок",
             "Погода",
@@ -282,9 +455,30 @@ class DocumentGenerator:
             "T почвы, °C",
             "Влажность почвы",
             "ET₀ / ПС",
-        )
-        widths = (28, 12, 25, 11, 11, 11, 11, 25, 30, 14, 30, 12, 23, 32, 18, 25, 31, 28, 34, 22)
-        groups = (
+        ]
+        widths = [
+            28,
+            12,
+            25,
+            11,
+            11,
+            11,
+            11,
+            25,
+            30,
+            14,
+            30,
+            12,
+            23,
+            32,
+            18,
+            25,
+            31,
+            28,
+            34,
+            22,
+        ]
+        groups = [
             ("Время", 0, 1),
             ("Явление", 2, 2),
             ("Температура и влажность", 3, 6),
@@ -295,7 +489,12 @@ class DocumentGenerator:
             ("Конвекция", 15, 15),
             ("Радиация", 16, 16),
             ("Почва и ПС", 17, 19),
-        )
+        ]
+        if include_additional:
+            headers.append("Ансамбль, уровни и прочие поля")
+            widths.append(48)
+            groups.append(("Все дополнительные параметры", 20, 20))
+
         table = document.add_table(rows=2, cols=len(headers))
         table.style = "Table Grid"
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -308,7 +507,12 @@ class DocumentGenerator:
             set_cell_text(cell, group_name, size=7, bold=True)
             set_cell_shading(cell, DARK_BLUE)
             self._set_text_color(cell, WHITE)
-        for cell, text, width in zip(table.rows[1].cells, headers, widths, strict=True):
+        for cell, text, width in zip(
+            table.rows[1].cells,
+            headers,
+            widths,
+            strict=True,
+        ):
             set_cell_text(cell, text, size=6.5, bold=True)
             set_cell_shading(cell, MID_BLUE)
             set_cell_width(cell, width)
@@ -327,9 +531,11 @@ class DocumentGenerator:
                 cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
 
             presentation = weather_presentation(point)
-            cells = (
+            cells = [
                 point.valid_time_local.strftime("%d.%m.%Y\n%H:%M"),
-                f"+{point.lead_hours} ч" if point.lead_hours is not None else "—",
+                f"+{point.lead_hours} ч"
+                if point.lead_hours is not None
+                else "—",
                 presentation.description,
                 self._value(point, "temperature_2m"),
                 self._value(point, "apparent_temperature"),
@@ -348,13 +554,18 @@ class DocumentGenerator:
                 self._soil_temperature_text(point),
                 self._soil_moisture_text(point),
                 self._surface_exchange_text(point),
-            )
+            ]
+            if include_additional:
+                cells.append(self._additional_parameters_text(point))
             for cell, text in zip(row.cells, cells, strict=True):
-                set_cell_text(cell, text, size=6.2)
+                set_cell_text(cell, text, size=5.9 if include_additional else 6.2)
             self._apply_hazard_shading(row.cells, point)
 
     @staticmethod
-    def _summary_points(points: list[ForecastPoint], options: DocumentOptions) -> Iterable[ForecastPoint]:
+    def _summary_points(
+        points: list[ForecastPoint],
+        options: DocumentOptions,
+    ) -> Iterable[ForecastPoint]:
         if not points:
             return []
         selected: list[ForecastPoint] = []
@@ -365,19 +576,30 @@ class DocumentGenerator:
                 if lead is None or lead <= options.summary_switch_hour
                 else options.extended_summary_interval_hours
             )
-            if index == 0 or index == len(points) - 1 or lead is None or lead % interval == 0:
+            if (
+                index == 0
+                or index == len(points) - 1
+                or lead is None
+                or lead % interval == 0
+            ):
                 selected.append(point)
         return selected
 
-    def _set_icon_cell(self, cell, icon_key: str, description: str) -> None:
+    def _set_icon_cell(
+        self,
+        cell,
+        icon_key: str,
+        description: str,
+    ) -> None:
         cell.text = ""
         paragraph = cell.paragraphs[0]
         paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
         paragraph.paragraph_format.space_after = Pt(0)
         run = paragraph.add_run()
-        shape = run.add_picture(str(self.icons.render(icon_key)), width=Mm(8))
-        # Accessible description is embedded in wp:docPr and does not depend on
-        # the icon filename or an external resource.
+        shape = run.add_picture(
+            str(self.icons.render(icon_key)),
+            width=Mm(8),
+        )
         shape._inline.docPr.set("descr", f"Пиктограмма погоды: {description}")
         shape._inline.docPr.set("title", description)
         description_run = paragraph.add_run(f"\n{description}")
@@ -397,7 +619,13 @@ class DocumentGenerator:
         measurement = point.measurement(code)
         return QUALITY_MARKERS.get(measurement.quality, "") if measurement else ""
 
-    def _value(self, point: ForecastPoint, code: str, *, with_unit: bool = False) -> str:
+    def _value(
+        self,
+        point: ForecastPoint,
+        code: str,
+        *,
+        with_unit: bool = False,
+    ) -> str:
         measurement = point.measurement(code)
         if measurement is None or measurement.value is None:
             return "—"
@@ -411,10 +639,17 @@ class DocumentGenerator:
             text = str(value)
         marker = QUALITY_MARKERS.get(measurement.quality, "")
         unit = measurement.unit or parameter.default_unit
-        return f"{text}{marker} {unit}".strip() if with_unit else f"{text}{marker}"
+        return (
+            f"{text}{marker} {unit}".strip()
+            if with_unit
+            else f"{text}{marker}"
+        )
 
     def _pressure_text(self, point: ForecastPoint) -> str:
-        return f"MSL {self._value(point, 'pressure_msl')}\nSFC {self._value(point, 'surface_pressure')}"
+        return (
+            f"MSL {self._value(point, 'pressure_msl')}\n"
+            f"SFC {self._value(point, 'surface_pressure')}"
+        )
 
     def _wind_text(self, point: ForecastPoint) -> str:
         speed = _number(point.raw("wind_speed_10m"))
@@ -422,8 +657,15 @@ class DocumentGenerator:
         if speed is None:
             return "—"
         rumb = wind_rumb(direction, speed)
-        direction_text = f"{direction:.0f}°" if direction is not None else "—"
-        marker = self._marker(point, "wind_speed_10m") or self._marker(point, "wind_direction_10m")
+        direction_text = (
+            f"{direction:.0f}°"
+            if direction is not None
+            else "—"
+        )
+        marker = (
+            self._marker(point, "wind_speed_10m")
+            or self._marker(point, "wind_direction_10m")
+        )
         return f"{speed:.1f}{marker} м/с\nиз {rumb}, {direction_text}"
 
     def _precipitation_text(self, point: ForecastPoint) -> str:
@@ -435,7 +677,10 @@ class DocumentGenerator:
         )
 
     def _snow_text(self, point: ForecastPoint) -> str:
-        return f"снег {self._value(point, 'snowfall')} см\nпокров {self._value(point, 'snow_depth')} м"
+        return (
+            f"снег {self._value(point, 'snowfall')} см\n"
+            f"покров {self._value(point, 'snow_depth')} м"
+        )
 
     def _cloud_text(self, point: ForecastPoint) -> str:
         return (
@@ -450,7 +695,11 @@ class DocumentGenerator:
         if value is None:
             return "—"
         marker = self._marker(point, "visibility")
-        return f"{value / 1000:.1f}{marker} км" if value >= 1000 else f"{value:.0f}{marker} м"
+        return (
+            f"{value / 1000:.1f}{marker} км"
+            if value >= 1000
+            else f"{value:.0f}{marker} м"
+        )
 
     def _convection_text(self, point: ForecastPoint) -> str:
         return (
@@ -461,7 +710,11 @@ class DocumentGenerator:
 
     def _radiation_text(self, point: ForecastPoint) -> str:
         sunshine = _number(point.raw("sunshine_duration"))
-        sunshine_text = "—" if sunshine is None else f"{sunshine / 60:.0f} мин"
+        sunshine_text = (
+            "—"
+            if sunshine is None
+            else f"{sunshine / 60:.0f} мин"
+        )
         return (
             f"КВ {self._value(point, 'shortwave_radiation')}\n"
             f"пр/рас {self._value(point, 'direct_radiation')}/"
@@ -494,6 +747,43 @@ class DocumentGenerator:
         )
 
     @staticmethod
+    def _has_additional_parameters(forecast: ForecastSeries) -> bool:
+        return any(
+            any(code not in REPRESENTED_CODES for code in point.values)
+            for point in forecast.points
+        )
+
+    def _additional_parameters_text(self, point: ForecastPoint) -> str:
+        codes = [
+            code
+            for code in point.values
+            if code not in REPRESENTED_CODES
+        ]
+        if not codes:
+            return "—"
+
+        codes.sort(
+            key=lambda code: (
+                definition(code).group,
+                definition(code).name_ru,
+            )
+        )
+        lines: list[str] = []
+        previous_group = None
+        for code in codes:
+            parameter = definition(code)
+            if parameter.group != previous_group:
+                if lines:
+                    lines.append("")
+                lines.append(f"[{parameter.group}]")
+                previous_group = parameter.group
+            name = _SHORT_PARAMETER_NAMES.get(code, parameter.name_ru)
+            lines.append(
+                f"{name}: {self._value(point, code, with_unit=True)}"
+            )
+        return "\n".join(lines)
+
+    @staticmethod
     def _apply_hazard_shading(cells, point: ForecastPoint) -> None:
         precipitation = _number(point.raw("precipitation")) or 0
         gust = _number(point.raw("wind_gusts_10m")) or 0
@@ -502,7 +792,15 @@ class DocumentGenerator:
         if precipitation >= 10 or gust >= 20 or cape >= 2000:
             for cell in cells:
                 set_cell_shading(cell, DANGER)
-        elif precipitation >= 3 or gust >= 14 or cape >= 1000 or (temperature is not None and (temperature <= -25 or temperature >= 35)):
+        elif (
+            precipitation >= 3
+            or gust >= 14
+            or cape >= 1000
+            or (
+                temperature is not None
+                and (temperature <= -25 or temperature >= 35)
+            )
+        ):
             for cell in cells:
                 set_cell_shading(cell, WARNING)
 
@@ -513,7 +811,8 @@ class DocumentGenerator:
             paragraph = footer.paragraphs[0]
             paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
             run = paragraph.add_run(
-                f"weather-to-docx · {location.name} · документ сформирован автоматически · "
+                f"weather-to-docx · {location.name} · "
+                "документ сформирован автоматически · "
             )
             run.font.name = "Liberation Sans"
             run.font.size = Pt(7)
