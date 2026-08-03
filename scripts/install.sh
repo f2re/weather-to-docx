@@ -38,11 +38,18 @@ restore_on_error() {
   code=$?
   trap - ERR
   echo "Установка прервана, выполняется безопасное восстановление." >&2
-  if [[ $SWITCHED -eq 1 && -n "$OLD_TARGET" && -d "$OLD_TARGET" ]]; then
-    ln -sfn "$OLD_TARGET" "$CURRENT_LINK.restore"
-    mv -Tf "$CURRENT_LINK.restore" "$CURRENT_LINK"
+  if [[ $SWITCHED -eq 1 ]]; then
+    if [[ -n "$OLD_TARGET" && -d "$OLD_TARGET" ]]; then
+      ln -sfn "$OLD_TARGET" "$CURRENT_LINK.restore"
+      mv -Tf "$CURRENT_LINK.restore" "$CURRENT_LINK"
+    else
+      rm -f "$CURRENT_LINK"
+    fi
   fi
   rm -rf "$STAGE_DIR"
+  if [[ -d "$RELEASE_DIR" && "$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)" != "$RELEASE_DIR" ]]; then
+    rm -rf "$RELEASE_DIR"
+  fi
   if systemd_enabled; then
     systemctl daemon-reload || true
     for service in "${SERVICES[@]}"; do
