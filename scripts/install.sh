@@ -12,9 +12,9 @@ ETC_DIR=/etc/$PROJECT
 DATA_DIR=/var/lib/$PROJECT
 BACKUP_DIR=$DATA_DIR/backups
 BUNDLE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-VERSION=$(tr -d '[:space:]' < "$BUNDLE_DIR/VERSION")
-RELEASE_DIR=$RELEASES_DIR/$VERSION
-STAGE_DIR=$RELEASES_DIR/.install-$VERSION-$$
+APP_VERSION=$(tr -d '[:space:]' < "$BUNDLE_DIR/VERSION")
+RELEASE_DIR=$RELEASES_DIR/$APP_VERSION
+STAGE_DIR=$RELEASES_DIR/.install-$APP_VERSION-$$
 OLD_TARGET=""
 SWITCHED=0
 SERVICES=(weather-to-docx-api.service weather-to-docx-worker.service)
@@ -172,7 +172,7 @@ stop_services_and_backup() {
 install_release() {
   [[ -d "$BUNDLE_DIR/wheelhouse" ]] || fatal "отсутствует wheelhouse"
   if [[ -e "$RELEASE_DIR" ]]; then
-    [[ ${WTD_REINSTALL:-0} == 1 ]] || fatal "релиз $VERSION уже существует; для осознанной переустановки задайте WTD_REINSTALL=1"
+    [[ ${WTD_REINSTALL:-0} == 1 ]] || fatal "релиз $APP_VERSION уже существует; для осознанной переустановки задайте WTD_REINSTALL=1"
     [[ "$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)" != "$RELEASE_DIR" ]] \
       || fatal "нельзя удалить текущий релиз при переустановке"
     rm -rf "$RELEASE_DIR"
@@ -184,9 +184,9 @@ install_release() {
   python_bin=$(select_python)
   echo "==> Python: $python_bin"
   "$python_bin" -m venv --copies "$STAGE_DIR/venv"
-  local package_spec="weather-to-docx==$VERSION"
+  local package_spec="weather-to-docx==$APP_VERSION"
   if [[ -f "$BUNDLE_DIR/wheelhouse/grib.enabled" ]]; then
-    package_spec="weather-to-docx[grib]==$VERSION"
+    package_spec="weather-to-docx[grib]==$APP_VERSION"
   fi
   "$STAGE_DIR/venv/bin/python" -m pip install \
     --no-index --disable-pip-version-check \
@@ -197,7 +197,7 @@ install_release() {
   cp "$BUNDLE_DIR/README.md" "$BUNDLE_DIR/CHANGELOG.md" "$BUNDLE_DIR/THIRD_PARTY_NOTICES.md" "$STAGE_DIR/share/"
   cp "$BUNDLE_DIR/rollback.sh" "$STAGE_DIR/bin/rollback-release"
   chmod 0755 "$STAGE_DIR/bin/rollback-release"
-  printf '%s\n' "$VERSION" > "$STAGE_DIR/VERSION"
+  printf '%s\n' "$APP_VERSION" > "$STAGE_DIR/VERSION"
   chown -R root:root "$STAGE_DIR"
   chmod -R go-w "$STAGE_DIR"
   mv "$STAGE_DIR" "$RELEASE_DIR"
@@ -265,7 +265,7 @@ initialise_and_validate
 start_services
 trap - ERR
 
-echo "==> Weather to DOCX $VERSION установлен"
+echo "==> Weather to DOCX $APP_VERSION установлен"
 echo "    Текущий релиз: $CURRENT_LINK -> $(readlink -f "$CURRENT_LINK")"
 echo "    Данные: $DATA_DIR"
 echo "    Настройки: $ETC_DIR/weather-to-docx.env"
