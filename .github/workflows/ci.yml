@@ -82,10 +82,73 @@ jobs:
           compgen -G 'dist/offline/weather-to-docx-offline-*.tar.zst' >/dev/null
           sha256sum -c dist/offline/*.tar.zst.sha256
 
+      - name: Установить и запустить собранный автономный комплект
+        if: matrix.python-version == '3.11'
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bundle=$(find dist/offline -maxdepth 1 -type f -name 'weather-to-docx-offline-*.tar.zst' -print -quit)
+          test -n "$bundle"
+          rm -rf dist/offline-extracted
+          mkdir -p dist/offline-extracted
+          tar --zstd -xf "$bundle" -C dist/offline-extracted
+          install_dir=$(find dist/offline-extracted -mindepth 1 -maxdepth 1 -type d -name 'weather-to-docx-offline-*' -print -quit)
+          test -n "$install_dir"
+
+          (
+            cd "$install_dir"
+            sha256sum -c SHA256SUMS
+          )
+
+          sudo env \
+            WTD_ALLOW_NON_ASTRA=1 \
+            WTD_SKIP_SYSTEMD=1 \
+            "$install_dir/install.sh"
+
+          test "$(/opt/weather-to-docx/current/venv/bin/weather-to-docx --version)" = "0.2.0"
+
+          sudo runuser -u weatherdoc -- env \
+            WTD_DATA_DIR=/var/lib/weather-to-docx \
+            /opt/weather-to-docx/current/venv/bin/python - <<'PY'
+          from pathlib import Path
+          import weather_to_docx
+          from weather_to_docx.api.app import create_app
+
+          package_dir = Path(weather_to_docx.__file__).resolve().parent
+          for name in ("index.html", "styles.css", "app.js"):
+              assert (package_dir / "static" / name).is_file(), name
+          app = create_app()
+          paths = {route.path for route in app.routes}
+          assert "/" in paths
+          assert "/api/v1/locations" in paths
+          assert "/api/v1/jobs" in paths
+          PY
+
+          sudo runuser -u weatherdoc -- env \
+            WTD_DATA_DIR=/var/lib/weather-to-docx \
+            /opt/weather-to-docx/current/venv/bin/weather-to-docx \
+            sample --output /var/lib/weather-to-docx/documents/install-smoke --hours 6
+
+          test -n "$(find /var/lib/weather-to-docx/documents/install-smoke -type f -name '*.docx' -print -quit)"
+
+          sudo env WTD_SKIP_SYSTEMD=1 "$install_dir/uninstall.sh" --purge-data
+          test ! -e /opt/weather-to-docx
+          test ! -e /var/lib/weather-to-docx
+
       - name: Сохранить DOCX-пример
         if: matrix.python-version == '3.11'
         uses: actions/upload-artifact@v4
         with:
           name: sample-docx
           path: var/ci-sample/**/*.docx
+          if-no-files-found: error
+
+      - name: Сохранить автономный комплект
+        if: matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: weather-to-docx-offline-0.2.0
+          path: |
+            dist/offline/*.tar.zst
+            dist/offline/*.tar.zst.sha256
           if-no-files-found: error
