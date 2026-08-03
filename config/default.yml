@@ -1,0 +1,22 @@
+# Пример пакетного задания. Скопируйте и измените координаты.
+batch_name: operational_forecast
+
+locations:
+  - id: example-point
+    name: Пример точки
+    latitude: 59.9386
+    longitude: 30.3141
+    elevation_m: 12
+    timezone: Europe/Moscow
+
+sources:
+  - source_id: open_meteo_gfs
+    forecast_days: 10
+
+document:
+  title: Метеорологический прогноз
+  page_size: A3
+  summary_interval_hours: 3
+  extended_summary_interval_hours: 6
+  summary_switch_hour: 120
+  include_detailed_table: true
