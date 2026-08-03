@@ -82,7 +82,7 @@ class SourceMetadata(BaseModel):
     licence: str | None = None
     source_reference: str | None = None
     attribution: str | None = None
-    adapter_version: str = "0.1.0"
+    adapter_version: str = "0.2.0"
     exact_cycle_known: bool = True
 
     @field_validator("cycle_time_utc", "retrieved_at_utc")
@@ -153,6 +153,11 @@ class DocumentOptions(BaseModel):
     extended_summary_interval_hours: int = Field(default=6, ge=1, le=24)
     summary_switch_hour: int = Field(default=120, ge=1, le=1000)
     include_detailed_table: bool = True
+    include_all_parameters: bool = True
+    parameter_profile: str = Field(
+        default="all",
+        pattern=r"^(operational|extended|all)$",
+    )
     page_size: str = Field(default="A3", pattern=r"^(A3|A4)$")
     language: str = Field(default="ru", pattern=r"^ru$")
     organisation: str | None = None
