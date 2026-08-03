@@ -19,6 +19,7 @@ RELEASE_DIR=$RELEASES_DIR/$APP_VERSION
 STAGE_DIR=$RELEASES_DIR/.install-$APP_VERSION-$$
 OLD_TARGET=""
 SWITCHED=0
+RELEASE_CREATED=0
 SERVICES=(weather-to-docx-api.service weather-to-docx-worker.service)
 
 fatal() {
@@ -47,7 +48,7 @@ restore_on_error() {
     fi
   fi
   rm -rf "$STAGE_DIR"
-  if [[ -d "$RELEASE_DIR" && "$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)" != "$RELEASE_DIR" ]]; then
+  if [[ $RELEASE_CREATED -eq 1 && -d "$RELEASE_DIR" && "$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)" != "$RELEASE_DIR" ]]; then
     rm -rf "$RELEASE_DIR"
   fi
   if systemd_enabled; then
@@ -211,6 +212,7 @@ install_release() {
   chown -R root:root "$STAGE_DIR"
   chmod -R go-w "$STAGE_DIR"
   mv "$STAGE_DIR" "$RELEASE_DIR"
+  RELEASE_CREATED=1
 }
 
 install_configuration() {
