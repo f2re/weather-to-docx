@@ -4,20 +4,61 @@ from weather_to_docx.settings import Settings
 from weather_to_docx.sources.base import ForecastSource, SourceDescriptor
 from weather_to_docx.sources.demo import DemoSource
 from weather_to_docx.sources.gfs_nomads import GfsNomadsSource
-from weather_to_docx.sources.open_meteo import OpenMeteoGfsSource
+from weather_to_docx.sources.open_meteo import (
+    OpenMeteoDwdIconGlobalSource,
+    OpenMeteoEcmwfAifsSource,
+    OpenMeteoEcmwfIfsSource,
+    OpenMeteoGemGdpsSource,
+    OpenMeteoGfsSource,
+)
+from weather_to_docx.sources.open_meteo_ensemble import (
+    OpenMeteoDwdIconEpsSource,
+    OpenMeteoEcmwfAifsEnsembleSource,
+    OpenMeteoEcmwfIfsEnsembleSource,
+    OpenMeteoGefS025Source,
+    OpenMeteoGefS05Source,
+    OpenMeteoGemGepsSource,
+)
 
 
 class SourceRegistry:
     def __init__(self, settings: Settings) -> None:
         self._sources: dict[str, ForecastSource] = {}
         self.register(DemoSource())
-        self.register(
-            OpenMeteoGfsSource(
-                timeout_seconds=settings.http_timeout_seconds,
-                max_retries=settings.http_max_retries,
-                user_agent=settings.http_user_agent,
-            )
+
+        deterministic_types = (
+            OpenMeteoGfsSource,
+            OpenMeteoEcmwfIfsSource,
+            OpenMeteoEcmwfAifsSource,
+            OpenMeteoDwdIconGlobalSource,
+            OpenMeteoGemGdpsSource,
         )
+        for source_type in deterministic_types:
+            self.register(
+                source_type(
+                    timeout_seconds=settings.http_timeout_seconds,
+                    max_retries=settings.http_max_retries,
+                    user_agent=settings.http_user_agent,
+                )
+            )
+
+        ensemble_types = (
+            OpenMeteoGefS025Source,
+            OpenMeteoGefS05Source,
+            OpenMeteoEcmwfIfsEnsembleSource,
+            OpenMeteoEcmwfAifsEnsembleSource,
+            OpenMeteoDwdIconEpsSource,
+            OpenMeteoGemGepsSource,
+        )
+        for source_type in ensemble_types:
+            self.register(
+                source_type(
+                    timeout_seconds=max(settings.http_timeout_seconds, 90),
+                    max_retries=settings.http_max_retries,
+                    user_agent=settings.http_user_agent,
+                )
+            )
+
         self.register(
             GfsNomadsSource(
                 cache_dir=settings.cache_dir,
