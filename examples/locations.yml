@@ -7,6 +7,7 @@ locations:
     longitude: 30.3141
     elevation_m: 12
     timezone: Europe/Moscow
+    group: Основные объекты
 
   - id: pskov-field-7
     name: Псковская область, поле 7
@@ -14,12 +15,40 @@ locations:
     longitude: 28.3496
     elevation_m: 48
     timezone: Europe/Moscow
+    group: Сельскохозяйственные поля
 
 sources:
+  # Детерминированные глобальные модели. Каждая попадёт в отдельную секцию DOCX.
   - source_id: open_meteo_gfs
     forecast_days: 10
 
-  # Для включения прямого NOAA GFS установите ecCodes и снимите комментарии.
+  - source_id: open_meteo_ecmwf_ifs
+    forecast_days: 10
+
+  - source_id: open_meteo_ecmwf_aifs
+    forecast_days: 10
+
+  - source_id: open_meteo_dwd_icon_global
+    forecast_days: 8
+
+  - source_id: open_meteo_gem_gdps
+    forecast_days: 10
+
+  # Ансамбль повышенного разрешения. PoP считается по членам, а не берётся
+  # из детерминированной суммы осадков.
+  - source_id: open_meteo_gefs_0p25
+    forecast_days: 10
+    options:
+      precipitation_threshold_mm: 0.1
+
+  # Дальняя тенденция GEFS до 35 суток. Для оперативного документа обычно
+  # достаточно 16 суток; увеличение задаётся явно.
+  - source_id: open_meteo_gefs_0p5
+    forecast_days: 16
+    options:
+      precipitation_threshold_mm: 0.1
+
+  # Для прямого NOAA GFS установите ecCodes и снимите комментарии.
   # - source_id: noaa_gfs_0p25
   #   forecast_days: 7
   #   options:
@@ -34,5 +63,7 @@ document:
   extended_summary_interval_hours: 6
   summary_switch_hour: 120
   include_detailed_table: true
+  include_all_parameters: true
+  parameter_profile: all
   organisation: Пример организации
   prepared_by: Дежурный инженер-метеоролог
