@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from weather_to_docx.domain.models import Location, TimezoneSource
 from weather_to_docx.geocoding.dadata import DadataClient, GeocodedPlace
+from weather_to_docx.geocoding.parser import parse_location_bytes
 from weather_to_docx.geocoding.timezone import resolve_timezone
 from weather_to_docx.settings import Settings
 
@@ -25,6 +26,17 @@ class ReverseRequest(BaseModel):
     count: int = Field(default=5, ge=1, le=20)
 
 
+class ParseLocationFileRequest(BaseModel):
+    filename: str = Field(min_length=1, max_length=255)
+    content: str = Field(max_length=20 * 1024 * 1024)
+    max_locations: int = Field(default=1000, ge=1, le=1000)
+
+
+class ParseLocationFileResponse(BaseModel):
+    locations: list[Location]
+    warnings: list[str]
+
+
 class GeocodingCandidate(BaseModel):
     name: str
     address: str
@@ -39,15 +51,17 @@ class GeocodingCandidate(BaseModel):
 def create_geocoding_router(settings: Settings) -> APIRouter:
     router = APIRouter(prefix="/api/v1/geocoding", tags=["geocoding"])
 
-    def client() -> DadataClient:
+    def dadata_client(*, required: bool = True) -> DadataClient | None:
         if not settings.dadata_token:
-            raise HTTPException(
-                status_code=503,
-                detail=(
-                    "DaData не настроена. Задайте WTD_DADATA_TOKEN в "
-                    "/etc/weather-to-docx/weather-to-docx.env"
-                ),
-            )
+            if required:
+                raise HTTPException(
+                    status_code=503,
+                    detail=(
+                        "DaData не настроена. Задайте WTD_DADATA_TOKEN в "
+                        "/etc/weather-to-docx/weather-to-docx.env"
+                    ),
+                )
+            return None
         return DadataClient(
             settings.dadata_token,
             secret=settings.dadata_secret,
@@ -58,7 +72,9 @@ def create_geocoding_router(settings: Settings) -> APIRouter:
     @router.post("/suggest", response_model=list[GeocodingCandidate])
     async def suggest(request: SuggestRequest) -> list[GeocodingCandidate]:
         try:
-            places = await client().suggest_address(request.query, count=request.count)
+            client = dadata_client()
+            assert client is not None
+            places = await client.suggest_address(request.query, count=request.count)
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return [_candidate(place, settings.default_timezone) for place in places]
@@ -66,7 +82,9 @@ def create_geocoding_router(settings: Settings) -> APIRouter:
     @router.post("/resolve", response_model=GeocodingCandidate)
     async def resolve(request: ResolveRequest) -> GeocodingCandidate:
         try:
-            place = await client().resolve_one(
+            client = dadata_client()
+            assert client is not None
+            place = await client.resolve_one(
                 request.query,
                 automatic=request.automatic,
             )
@@ -79,7 +97,9 @@ def create_geocoding_router(settings: Settings) -> APIRouter:
     @router.post("/reverse", response_model=list[GeocodingCandidate])
     async def reverse(request: ReverseRequest) -> list[GeocodingCandidate]:
         try:
-            places = await client().reverse(
+            client = dadata_client()
+            assert client is not None
+            places = await client.reverse(
                 request.latitude,
                 request.longitude,
                 count=request.count,
@@ -87,6 +107,38 @@ def create_geocoding_router(settings: Settings) -> APIRouter:
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
         return [_candidate(place, settings.default_timezone) for place in places]
+
+    @router.post(
+        "/parse-file",
+        response_model=ParseLocationFileResponse,
+    )
+    async def parse_file(
+        request: ParseLocationFileRequest,
+    ) -> ParseLocationFileResponse:
+        """Единый предварительный разбор TXT/CSV/JSON без записи в справочник."""
+
+        suffix = request.filename.lower().rsplit(".", 1)[-1]
+        if suffix not in {"txt", "csv", "json"}:
+            raise HTTPException(
+                status_code=422,
+                detail="Поддерживаются только TXT, CSV и JSON",
+            )
+        try:
+            result = await parse_location_bytes(
+                request.filename,
+                request.content.encode("utf-8"),
+                geocoder=dadata_client(required=False),
+                default_timezone=settings.default_timezone,
+                max_locations=request.max_locations,
+            )
+        except (UnicodeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return ParseLocationFileResponse(
+            locations=result.locations,
+            warnings=result.warnings,
+        )
 
     return router
 
