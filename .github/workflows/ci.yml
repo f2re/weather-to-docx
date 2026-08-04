@@ -93,18 +93,46 @@ jobs:
         env:
           INCLUDE_GRIB: "0"
           OUTPUT_DIR: dist/offline
+        shell: bash
         run: |
+          set -Eeuo pipefail
+          mkdir -p dist/offline
+          exec > >(tee dist/offline/offline-build.log) 2>&1
+          trap 'code=$?; echo "FAILED line=$LINENO command=$BASH_COMMAND exit=$code"; exit $code' ERR
+          set -x
+
           bash scripts/build-offline-bundle.sh
-          archive=$(find dist/offline -maxdepth 1 -name 'weather-to-docx-offline-*.tar.zst' -print -quit)
+          archive=$(find dist/offline -maxdepth 1 -type f -name 'weather-to-docx-offline-*.tar.zst' -print -quit)
           test -n "$archive"
-          sha256sum -c "$archive.sha256"
-          tar --zstd -tf "$archive" > dist/offline/contents.txt
-          grep -q '/setup.sh$' dist/offline/contents.txt
-          grep -q '/configure.sh$' dist/offline/contents.txt
-          grep -q '/systemd/weather-to-docx-telegram.service$' dist/offline/contents.txt
-          grep -q '/docs/ENSEMBLES.md$' dist/offline/contents.txt
-          grep -q '/docs/TELEGRAM.md$' dist/offline/contents.txt
-          grep -q '/docs/DADATA.md$' dist/offline/contents.txt
+          test -f "${archive}.sha256"
+          sha256sum -c "${archive}.sha256"
+          tar --zstd -tf "$archive" | tee dist/offline/contents.txt
+
+          required=(
+            '/setup.sh'
+            '/configure.sh'
+            '/systemd/weather-to-docx-telegram.service'
+            '/docs/ENSEMBLES.md'
+            '/docs/TELEGRAM.md'
+            '/docs/DADATA.md'
+          )
+          for suffix in "${required[@]}"; do
+            grep -Fq "$suffix" dist/offline/contents.txt || {
+              echo "В архиве отсутствует обязательный путь: $suffix" >&2
+              exit 1
+            }
+          done
+
+      - name: Сохранить диагностику офлайн-комплекта
+        if: always() && matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-bundle-diagnostics
+          path: |
+            dist/offline/offline-build.log
+            dist/offline/contents.txt
+            dist/offline/*.sha256
+          if-no-files-found: warn
 
       - name: Сохранить DOCX-пример
         if: matrix.python-version == '3.11'
