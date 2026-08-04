@@ -312,7 +312,7 @@ def test_report_contains_summary_and_model_meteogram_appendices(tmp_path: Path) 
     assert "Модель ECMWF IFS" in text
     assert "Модель ICON" in text
     assert "Модель GDPS" in text
-    assert "Ансамблевая оценка неопределённости" in text
+    assert "Неопределённость прогноза" in text
 
     assert "1. Наглядный прогноз" not in text
     assert "2. Подробный метеорологический отчёт" not in text
