@@ -103,11 +103,11 @@ async function loadDiagnostics() {
   const d = state.diagnostics;
   byId("dadataHint").textContent = d.dadata_configured
     ? "DaData подключена: доступны города и адреса."
-    : "DaData не настроена: вводите координаты или добавьте WTD_DADATA_TOKEN.";
+    : "Используется бесплатный OpenStreetMap Nominatim: доступны города и адреса.";
   const rows = [
     ["Версия", d.version],
     ["Модели", `${d.deterministic_source_count} дет. / ${d.ensemble_source_count} ансамбл.`],
-    ["DaData", d.dadata_configured ? "подключена" : "не настроена"],
+    ["Геокодер", d.geocoder_provider || (d.dadata_configured ? "DaData" : "Nominatim")],
     ["Telegram", d.telegram_enabled ? "включён" : "выключен"],
     ["ecCodes", d.eccodes_python ? "доступен" : "не установлен"],
   ];

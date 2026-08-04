@@ -86,9 +86,12 @@ VIS CAPE CIN DSWRF PWAT HPBL WEASD SNOD
 
 ### Зависимости
 
+`eccodes` входит в основную зависимость приложения, поэтому обычная установка
+`python -m pip install weather-to-docx` уже включает декодер GRIB2. Для
+системного Python без wheel-пакетов установите библиотеку ОС:
+
 ```bash
 sudo apt install libeccodes0 libeccodes-data
-python -m pip install 'weather-to-docx[grib]'
 ```
 
 В закрытой установке эти пакеты должны присутствовать в офлайн-комплекте.

@@ -120,6 +120,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ),
             "dadata_configured": settings.dadata_configured,
             "dadata_cleaner_configured": bool(settings.dadata_secret),
+            "geocoder_provider": settings.geocoder_provider,
             "telegram_enabled": settings.telegram_enabled,
             "telegram_token_configured": bool(settings.telegram_bot_token),
             "default_sources": list(settings.default_sources),

@@ -24,6 +24,7 @@ HTTP API ─────────┤
 CLI ──────────────┼──► Location / BatchRequest
 Telegram-бот ─────┘              │
                                  ├──► DaData suggest / clean / reverse
+                                 ├──► OpenStreetMap Nominatim (fallback)
                                  │
                                  ▼
                      ForecastBatchService
@@ -64,7 +65,7 @@ src/weather_to_docx/
 ├── document/            DOCX, стили, пиктограммы, научная композиция
 ├── domain/              предметная модель и типы источников
 ├── ensemble/            научные операции над ансамблем
-├── geocoding/           DaData и разбор TXT/CSV/JSON
+├── geocoding/           DaData, Nominatim и разбор TXT/CSV/JSON
 ├── services/            пакетная обработка и прогнозные пакеты
 ├── sources/             адаптеры моделей
 ├── static/              автономный интерфейс
@@ -143,7 +144,9 @@ source_end_step
 
 ## Геокодирование
 
-`DadataClient` реализует три серверных метода:
+Фабрика геокодера выбирает `DadataClient`, если задан token, иначе бесплатный
+`NominatimClient`. Оба реализуют общий интерфейс поиска и обратного
+геокодирования. DaData дополнительно предоставляет пакетную очистку адресов:
 
 ```text
 suggest_address

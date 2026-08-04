@@ -6,6 +6,8 @@ import httpx
 import pytest
 
 from weather_to_docx.geocoding.dadata import DadataClient
+from weather_to_docx.geocoding.factory import create_geocoder
+from weather_to_docx.geocoding.nominatim import NominatimClient
 from weather_to_docx.geocoding.parser import (
     parse_coordinates,
     parse_location_bytes,
@@ -123,12 +125,57 @@ async def test_json_file_locations() -> None:
 
 
 @pytest.mark.asyncio
-async def test_city_without_dadata_is_rejected() -> None:
-    with pytest.raises(ValueError, match="ни одной координаты"):
-        await resolve_items(
-            ["Псков"],
-            geocoder=None,
-            default_timezone="Europe/Moscow",
-            max_locations=10,
-            automatic=False,
+async def test_nominatim_suggest_reverse_and_resolve() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.headers["User-Agent"] == "weather-to-docx-test"
+        if request.url.path.endswith("/reverse"):
+            return httpx.Response(
+                200,
+                json={
+                    "lat": "57.8193",
+                    "lon": "28.3325",
+                    "display_name": "Псков, Россия",
+                    "address": {"city": "Псков"},
+                    "addresstype": "city",
+                },
+            )
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "lat": "57.8193",
+                    "lon": "28.3325",
+                    "display_name": "Псков, Россия",
+                    "address": {"city": "Псков"},
+                    "addresstype": "city",
+                }
+            ],
         )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        geocoder = NominatimClient(
+            base_url="https://nominatim.example",
+            user_agent="weather-to-docx-test",
+            client=client,
+        )
+        suggestions = await geocoder.suggest_address("Псков")
+        reverse = await geocoder.reverse(57.8193, 28.3325)
+        resolved = await geocoder.resolve_one("Псков")
+
+    assert suggestions[0].name == "Псков"
+    assert reverse[0].source == "OpenStreetMap Nominatim"
+    assert resolved is not None
+    assert len(requests) == 3
+
+
+def test_factory_uses_free_geocoder_without_dadata(tmp_path) -> None:
+    from weather_to_docx.settings import Settings
+
+    assert isinstance(create_geocoder(Settings(data_dir=tmp_path)), NominatimClient)
+    assert isinstance(
+        create_geocoder(Settings(data_dir=tmp_path, dadata_token="token")),
+        DadataClient,
+    )

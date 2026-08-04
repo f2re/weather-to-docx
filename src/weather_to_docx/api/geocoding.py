@@ -4,7 +4,8 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from weather_to_docx.domain.models import Location, TimezoneSource
-from weather_to_docx.geocoding.dadata import DadataClient, GeocodedPlace
+from weather_to_docx.geocoding.dadata import GeocodedPlace
+from weather_to_docx.geocoding.factory import create_geocoder
 from weather_to_docx.geocoding.parser import parse_location_bytes
 from weather_to_docx.geocoding.timezone import resolve_timezone
 from weather_to_docx.settings import Settings
@@ -51,29 +52,13 @@ class GeocodingCandidate(BaseModel):
 def create_geocoding_router(settings: Settings) -> APIRouter:
     router = APIRouter(prefix="/api/v1/geocoding", tags=["geocoding"])
 
-    def dadata_client(*, required: bool = True) -> DadataClient | None:
-        if not settings.dadata_token:
-            if required:
-                raise HTTPException(
-                    status_code=503,
-                    detail=(
-                        "DaData не настроена. Задайте WTD_DADATA_TOKEN в "
-                        "/etc/weather-to-docx/weather-to-docx.env"
-                    ),
-                )
-            return None
-        return DadataClient(
-            settings.dadata_token,
-            secret=settings.dadata_secret,
-            timeout_seconds=settings.dadata_timeout_seconds,
-            user_agent=settings.http_user_agent,
-        )
+    def geocoder():
+        return create_geocoder(settings)
 
     @router.post("/suggest", response_model=list[GeocodingCandidate])
     async def suggest(request: SuggestRequest) -> list[GeocodingCandidate]:
         try:
-            client = dadata_client()
-            assert client is not None
+            client = geocoder()
             places = await client.suggest_address(request.query, count=request.count)
         except RuntimeError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
@@ -82,8 +67,7 @@ def create_geocoding_router(settings: Settings) -> APIRouter:
     @router.post("/resolve", response_model=GeocodingCandidate)
     async def resolve(request: ResolveRequest) -> GeocodingCandidate:
         try:
-            client = dadata_client()
-            assert client is not None
+            client = geocoder()
             place = await client.resolve_one(
                 request.query,
                 automatic=request.automatic,
@@ -97,8 +81,7 @@ def create_geocoding_router(settings: Settings) -> APIRouter:
     @router.post("/reverse", response_model=list[GeocodingCandidate])
     async def reverse(request: ReverseRequest) -> list[GeocodingCandidate]:
         try:
-            client = dadata_client()
-            assert client is not None
+            client = geocoder()
             places = await client.reverse(
                 request.latitude,
                 request.longitude,
@@ -127,7 +110,7 @@ def create_geocoding_router(settings: Settings) -> APIRouter:
             result = await parse_location_bytes(
                 request.filename,
                 request.content.encode("utf-8"),
-                geocoder=dadata_client(required=False),
+                geocoder=geocoder(),
                 default_timezone=settings.default_timezone,
                 max_locations=request.max_locations,
             )

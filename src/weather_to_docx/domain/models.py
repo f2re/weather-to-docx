@@ -253,6 +253,18 @@ class DocumentOptions(BaseModel):
     organisation: str | None = None
     prepared_by: str | None = None
 
+    @model_validator(mode="after")
+    def validate_page_size_profile(self) -> DocumentOptions:
+        if self.page_size != "A4" or self.parameter_profile == "operational":
+            return self
+        if "parameter_profile" not in self.model_fields_set:
+            self.parameter_profile = "operational"
+            return self
+        raise ValueError(
+            "Формат A4 поддерживает только оперативный профиль. "
+            "Для расширенного или полного отчёта используйте A3."
+        )
+
 
 class BatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
