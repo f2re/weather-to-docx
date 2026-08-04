@@ -1,10 +1,21 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from ipaddress import ip_address
 from pathlib import Path
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def is_loopback_host(value: str) -> bool:
+    host = value.strip().lower().strip("[]")
+    if host == "localhost":
+        return True
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 class Settings(BaseSettings):
@@ -24,6 +35,7 @@ class Settings(BaseSettings):
 
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8080, ge=1, le=65535)
+    allow_insecure_network_api: bool = False
     default_timezone: str = "Europe/Moscow"
     default_forecast_days: int = Field(default=7, ge=1, le=35)
     default_source_ids: str = (
@@ -114,6 +126,16 @@ class Settings(BaseSettings):
             raise ValueError(
                 "WTD_WORKER_LEASE_SECONDS должен быть больше двойного интервала heartbeat"
             )
+        if (
+            not is_loopback_host(self.api_host)
+            and not self.allow_insecure_network_api
+        ):
+            raise ValueError(
+                "Сетевой HTTP API без аутентификации запрещён. Оставьте "
+                "WTD_API_HOST=127.0.0.1 и используйте Nginx/HAProxy с TLS, "
+                "либо явно задайте WTD_ALLOW_INSECURE_NETWORK_API=true, "
+                "понимая риск."
+            )
         return self
 
     @property
@@ -137,6 +159,10 @@ class Settings(BaseSettings):
     @property
     def dadata_configured(self) -> bool:
         return bool(self.dadata_token)
+
+    @property
+    def api_exposed_without_authentication(self) -> bool:
+        return not is_loopback_host(self.api_host)
 
     def ensure_directories(self) -> None:
         for path in (
