@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
-from weather_to_docx.domain.models import ForecastSeries, Location
+from weather_to_docx.domain.models import ForecastSeries, Location, SourceKind
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,6 +15,7 @@ class SourceDescriptor:
     model: str
     horizon_days: int
     exact_cycle: bool
+    source_kind: SourceKind = SourceKind.DETERMINISTIC
     implementation_status: str = "ready"
     notes: str | None = None
 
