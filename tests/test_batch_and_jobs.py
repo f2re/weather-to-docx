@@ -36,6 +36,27 @@ def test_batch_generates_one_document_per_location(tmp_path: Path) -> None:
     assert len([item for item in result.artifacts if item.kind == "zip"]) == 1
 
 
+def test_batch_reports_progress_per_location_and_source(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path / "data")
+    settings.ensure_directories()
+    events: list[tuple[int, int, str]] = []
+
+    async def progress(current: int, total: int, message: str) -> None:
+        events.append((current, total, message))
+
+    result = asyncio.run(
+        ForecastBatchService(settings).generate(
+            request(),
+            output_root=tmp_path / "out",
+            progress_callback=progress,
+        )
+    )
+    assert result.status == JobStatus.COMPLETED
+    assert events[0] == (0, 2, "Получение прогностических рядов")
+    assert {event[0] for event in events if "/ demo:" in event[2]} == {1, 2}
+    assert events[-1] == (2, 2, "Документы сформированы")
+
+
 def test_sqlite_job_queue(tmp_path: Path) -> None:
     repository = JobRepository(tmp_path / "jobs.sqlite3")
     created = repository.create(request())

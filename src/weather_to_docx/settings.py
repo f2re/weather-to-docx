@@ -1,10 +1,21 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from ipaddress import ip_address
 from pathlib import Path
 
 from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def is_loopback_host(value: str) -> bool:
+    host = value.strip().lower().strip("[]")
+    if host == "localhost":
+        return True
+    try:
+        return ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 class Settings(BaseSettings):
@@ -24,6 +35,7 @@ class Settings(BaseSettings):
 
     api_host: str = "127.0.0.1"
     api_port: int = Field(default=8080, ge=1, le=65535)
+    allow_insecure_network_api: bool = False
     default_timezone: str = "Europe/Moscow"
     default_forecast_days: int = Field(default=7, ge=1, le=35)
     default_source_ids: str = (
@@ -34,8 +46,13 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = Field(default=60, gt=0, le=600)
     http_max_retries: int = Field(default=3, ge=1, le=10)
     http_user_agent: str = (
-        "weather-to-docx/0.3.0 (+https://github.com/f2re/weather-to-docx)"
+        "weather-to-docx/0.3.1 (+https://github.com/f2re/weather-to-docx)"
     )
+
+    worker_heartbeat_seconds: float = Field(default=5, ge=1, le=60)
+    worker_lease_seconds: int = Field(default=30, ge=10, le=3600)
+    worker_online_max_age_seconds: int = Field(default=20, ge=5, le=600)
+    worker_max_attempts: int = Field(default=3, ge=1, le=20)
 
     dadata_token: str | None = None
     dadata_secret: str | None = None
@@ -49,6 +66,8 @@ class Settings(BaseSettings):
     telegram_max_input_bytes: int = Field(default=20 * 1024 * 1024, ge=1024)
     telegram_max_output_bytes: int = Field(default=50 * 1024 * 1024, ge=1024)
     telegram_concurrency: int = Field(default=2, ge=1, le=20)
+    telegram_job_poll_seconds: float = Field(default=3, ge=1, le=30)
+    telegram_job_timeout_seconds: int = Field(default=1800, ge=30, le=86400)
 
     require_bundle_signature: bool = False
     bundle_public_key: Path | None = None
@@ -103,6 +122,20 @@ class Settings(BaseSettings):
             raise ValueError(
                 "WTD_TELEGRAM_ENABLED=true требует WTD_TELEGRAM_BOT_TOKEN"
             )
+        if self.worker_lease_seconds <= self.worker_heartbeat_seconds * 2:
+            raise ValueError(
+                "WTD_WORKER_LEASE_SECONDS должен быть больше двойного интервала heartbeat"
+            )
+        if (
+            not is_loopback_host(self.api_host)
+            and not self.allow_insecure_network_api
+        ):
+            raise ValueError(
+                "Сетевой HTTP API без аутентификации запрещён. Оставьте "
+                "WTD_API_HOST=127.0.0.1 и используйте Nginx/HAProxy с TLS, "
+                "либо явно задайте WTD_ALLOW_INSECURE_NETWORK_API=true, "
+                "понимая риск."
+            )
         return self
 
     @property
@@ -126,6 +159,10 @@ class Settings(BaseSettings):
     @property
     def dadata_configured(self) -> bool:
         return bool(self.dadata_token)
+
+    @property
+    def api_exposed_without_authentication(self) -> bool:
+        return not is_loopback_host(self.api_host)
 
     def ensure_directories(self) -> None:
         for path in (

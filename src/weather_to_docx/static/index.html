@@ -6,7 +6,9 @@
   <meta name="color-scheme" content="light">
   <title>Weather to DOCX</title>
   <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/reliability.css">
   <script src="/static/app.js" defer></script>
+  <script src="/static/reliability.js" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -41,12 +43,14 @@
 
         <form id="locationForm" class="quick-block compact-form">
           <label>Координаты</label>
-          <div class="coordinate-row">
+          <div class="coordinate-row reliability-coordinate-row">
             <input id="locationName" placeholder="Название точки">
             <input id="locationLatitude" type="number" min="-90" max="90" step="0.000001" placeholder="Широта">
             <input id="locationLongitude" type="number" min="-180" max="180" step="0.000001" placeholder="Долгота">
+            <input id="locationTimezone" placeholder="Часовой пояс: авто" autocomplete="off">
             <button class="button secondary" type="submit">Добавить</button>
           </div>
+          <small id="timezoneHint" class="muted">Если поле пустое, IANA timezone определяется локально по координатам.</small>
         </form>
       </div>
 
@@ -60,9 +64,27 @@
         <button id="exportLocations" class="button ghost" type="button">Экспорт JSON</button>
       </div>
 
+      <div id="importPreview" class="import-preview" hidden>
+        <div class="section-title">
+          <div><h3>Предварительная проверка импорта</h3></div>
+          <span id="importPreviewSummary" class="muted"></span>
+        </div>
+        <div id="importWarnings" class="import-warnings"></div>
+        <div class="table-wrap import-table-wrap">
+          <table class="table">
+            <thead><tr><th>Строка</th><th>Точка</th><th>Координаты</th><th>Часовой пояс</th></tr></thead>
+            <tbody id="importPreviewBody"></tbody>
+          </table>
+        </div>
+        <div class="import-actions">
+          <button id="confirmImport" class="button primary" type="button">Добавить проверенные точки</button>
+          <button id="cancelImport" class="button ghost" type="button">Отменить импорт</button>
+        </div>
+      </div>
+
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th></th><th>Точка</th><th>Координаты</th><th>Группа</th><th></th></tr></thead>
+          <thead><tr><th></th><th>Точка</th><th>Координаты и время</th><th>Группа</th><th></th></tr></thead>
           <tbody id="locationsBody"><tr><td colspan="5" class="empty">Загрузка…</td></tr></tbody>
         </table>
       </div>
@@ -101,11 +123,13 @@
       </div>
       <button id="createJob" class="button primary large" type="button">Сформировать документы</button>
       <p id="selectionSummary" class="muted">Выберите точки и модели.</p>
+      <p id="horizonSummary" class="muted"></p>
     </section>
 
     <section class="card status-card">
       <div class="section-title"><div><h2>Система</h2></div></div>
       <div id="diagnostics" class="diagnostics"></div>
+      <div id="reliabilityStatus" class="reliability-status" aria-live="polite"></div>
     </section>
 
     <section class="card full">

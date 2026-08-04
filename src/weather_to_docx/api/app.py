@@ -12,7 +12,14 @@ from pydantic import BaseModel, Field
 
 from weather_to_docx import __version__
 from weather_to_docx.api.geocoding import create_geocoding_router
-from weather_to_docx.domain.models import BatchRequest, JobRecord, JobStatus, Location
+from weather_to_docx.domain.models import (
+    BatchRequest,
+    JobRecord,
+    JobStatus,
+    Location,
+    TimezoneSource,
+)
+from weather_to_docx.geocoding.timezone import resolve_timezone
 from weather_to_docx.settings import Settings, get_settings
 from weather_to_docx.sources.registry import SourceRegistry
 from weather_to_docx.storage.jobs import JobRepository
@@ -25,11 +32,18 @@ class LocationImportRequest(BaseModel):
     replace_existing: bool = False
 
 
+class TimezoneResolveRequest(BaseModel):
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    fallback: str | None = None
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     settings.ensure_directories()
     repository = JobRepository(settings.database_path)
     repository.initialise()
+    recovered_jobs = repository.recover_stale_jobs()
     locations = LocationRepository(settings.database_path)
     locations.initialise()
     registry = SourceRegistry(settings)
@@ -46,6 +60,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.repository = repository
     app.state.locations = locations
     app.state.registry = registry
+    app.state.recovered_jobs = recovered_jobs
     app.include_router(create_geocoding_router(settings))
 
     static_dir = Path(__file__).resolve().parent.parent / "static"
@@ -64,11 +79,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/health", tags=["system"])
     def health() -> dict:
-        return {"status": "ok", "version": __version__}
+        worker = repository.worker_status(
+            max_age_seconds=settings.worker_online_max_age_seconds
+        )
+        return {
+            "status": "ok" if worker["online"] else "degraded",
+            "version": __version__,
+            "worker_online": worker["online"],
+        }
 
     @app.get("/api/v1/diagnostics", tags=["system"])
     def diagnostics() -> dict:
         descriptors = registry.descriptors()
+        worker = repository.worker_status(
+            max_age_seconds=settings.worker_online_max_age_seconds
+        )
         return {
             "version": __version__,
             "data_dir": str(settings.data_dir),
@@ -78,6 +103,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "documents_writable": _is_writable(settings.documents_dir),
             "zstd": shutil.which("zstd"),
             "eccodes_python": importlib.util.find_spec("eccodes") is not None,
+            "timezonefinder": importlib.util.find_spec("timezonefinder") is not None,
             "require_bundle_signature": settings.require_bundle_signature,
             "bundle_public_key": (
                 str(settings.bundle_public_key)
@@ -98,6 +124,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "telegram_token_configured": bool(settings.telegram_bot_token),
             "default_sources": list(settings.default_sources),
             "default_forecast_days": settings.default_forecast_days,
+            "default_timezone": settings.default_timezone,
+            "worker": worker,
+            "queue": repository.queue_metrics(),
+            "recovered_stale_jobs_on_start": recovered_jobs,
+        }
+
+    @app.post("/api/v1/timezone/resolve", tags=["locations"])
+    def resolve_location_timezone(request: TimezoneResolveRequest) -> dict:
+        try:
+            timezone, source = resolve_timezone(
+                request.latitude,
+                request.longitude,
+                fallback=request.fallback or settings.default_timezone,
+            )
+        except (RuntimeError, ValueError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+        return {
+            "timezone": timezone,
+            "source": source,
+            "latitude": request.latitude,
+            "longitude": request.longitude,
         }
 
     @app.get("/api/v1/sources", tags=["sources"])
@@ -136,7 +183,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     def create_location(location: Location) -> Location:
         try:
-            return locations.create(location)
+            return locations.create(_normalise_location_timezone(location, settings))
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -158,7 +205,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     def replace_location(location_id: str, location: Location) -> Location:
         try:
-            return locations.replace(location_id, location)
+            return locations.replace(
+                location_id,
+                _normalise_location_timezone(location, settings),
+            )
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
@@ -185,8 +235,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     def import_locations(request: LocationImportRequest) -> list[Location]:
         try:
+            normalized = [
+                _normalise_location_timezone(item, settings)
+                for item in request.locations
+            ]
             return locations.import_many(
-                request.locations,
+                normalized,
                 replace_existing=request.replace_existing,
             )
         except ValueError as exc:
@@ -199,7 +253,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tags=["jobs"],
     )
     def create_job(request: BatchRequest) -> JobRecord:
-        return repository.create(request)
+        normalized = request.model_copy(
+            update={
+                "locations": [
+                    _normalise_location_timezone(item, settings)
+                    for item in request.locations
+                ]
+            }
+        )
+        return repository.create(normalized)
 
     @app.get(
         "/api/v1/jobs",
@@ -269,6 +331,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return FileResponse(path, filename=path.name)
 
     return app
+
+
+def _normalise_location_timezone(
+    location: Location,
+    settings: Settings,
+) -> Location:
+    if location.timezone_source != TimezoneSource.SYSTEM_DEFAULT:
+        return location
+    timezone, source = resolve_timezone(
+        location.latitude,
+        location.longitude,
+        fallback=settings.default_timezone,
+    )
+    return location.model_copy(
+        update={"timezone": timezone, "timezone_source": source}
+    )
 
 
 def _job_or_404(repository: JobRepository, job_id: str) -> JobRecord:

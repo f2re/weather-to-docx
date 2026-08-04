@@ -40,6 +40,7 @@ jobs:
       - name: Проверка JavaScript и сценариев установки
         run: |
           node --check src/weather_to_docx/static/app.js
+          node --check src/weather_to_docx/static/reliability.js
           for script in scripts/*.sh; do bash -n "$script"; done
 
       - name: Тесты
@@ -68,10 +69,14 @@ jobs:
               "weather_to_docx/static/index.html",
               "weather_to_docx/static/styles.css",
               "weather_to_docx/static/app.js",
+              "weather_to_docx/static/reliability.js",
+              "weather_to_docx/static/reliability.css",
               "weather_to_docx/ensemble/science.py",
               "weather_to_docx/document/scientific_generator.py",
               "weather_to_docx/geocoding/dadata.py",
-              "weather_to_docx/telegram_bot.py",
+              "weather_to_docx/geocoding/timezone.py",
+              "weather_to_docx/storage/jobs_v2.py",
+              "weather_to_docx/telegram_queue_bot.py",
               "weather_to_docx/api_entrypoint.py",
               "weather_to_docx/telegram_entrypoint.py",
           }
@@ -115,6 +120,7 @@ jobs:
             '/docs/ENSEMBLES.md'
             '/docs/TELEGRAM.md'
             '/docs/DADATA.md'
+            '/docs/REMEDIATION_PLAN.md'
           )
           for suffix in "${required[@]}"; do
             grep -Fq "$suffix" dist/offline/contents.txt || {

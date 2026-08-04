@@ -1,6 +1,6 @@
 # 🔌 HTTP API
 
-API обслуживает веб-интерфейс, справочник точек, DaData, очередь заданий и загрузку результатов.
+API предназначен для справочника точек, предварительной проверки импорта, постановки устойчивых заданий и загрузки результатов.
 
 Интерактивная схема:
 
@@ -14,181 +14,231 @@ OpenAPI JSON:
 http://127.0.0.1:8080/openapi.json
 ```
 
-## Запуск
+## Безопасность
 
-Установленная служба:
+По умолчанию API слушает только:
 
-```bash
-sudo systemctl start weather-to-docx-api weather-to-docx-worker
+```text
+127.0.0.1:8080
 ```
 
-Ручной запуск с параметрами из `WTD_API_HOST` и `WTD_API_PORT`:
+Приложение не разрешает случайный bind на `0.0.0.0` или сетевой адрес. Для доступа из сети используйте Nginx/HAProxy с TLS и принятой схемой аутентификации.
 
-```bash
-weather-to-docx-api
-weather-to-docx worker --poll-interval 5
+Опасное исключение:
+
+```dotenv
+WTD_ALLOW_INSECURE_NETWORK_API=true
 ```
 
-## Состояние системы
+не является заменой аутентификации и не рекомендуется для рабочего контура.
+
+## Системные методы
 
 ### `GET /health`
+
+Возвращает состояние API и worker:
 
 ```json
 {
   "status": "ok",
-  "version": "0.3.0"
+  "version": "0.3.1",
+  "worker_online": true,
+  "worker_last_seen_utc": "2026-08-04T12:00:00+00:00"
 }
 ```
 
 ### `GET /api/v1/diagnostics`
 
-Возвращает:
+Основные поля:
 
-- версию;
-- пути базы и документов;
-- доступность записи;
-- наличие `zstd` и ecCodes;
-- число детерминированных и ансамблевых источников;
-- состояние DaData и Telegram;
-- набор моделей и горизонт по умолчанию.
-
-DaData token, secret и Telegram token не возвращаются.
-
-## Геокодирование
-
-### `POST /api/v1/geocoding/suggest`
-
-Интерактивные подсказки DaData:
-
-```bash
-curl -sS -X POST http://127.0.0.1:8080/api/v1/geocoding/suggest \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"Псков","count":5}'
+```text
+version
+worker.online
+worker.worker_id
+worker.last_seen_utc
+worker.age_seconds
+queue.queued
+queue.running
+queue.stale_running
+timezonefinder
+eccodes_python
+dadata_configured
+telegram_enabled
+default_sources
+default_forecast_days
 ```
 
-### `POST /api/v1/geocoding/resolve`
-
-Один выбранный адрес:
-
-```bash
-curl -sS -X POST http://127.0.0.1:8080/api/v1/geocoding/resolve \
-  -H 'Content-Type: application/json' \
-  -d '{"query":"Псков","automatic":false}'
-```
-
-При `automatic=true` используется DaData Clean API, если задан `WTD_DADATA_SECRET`. Без secret возвращается первая подсказка.
-
-### `POST /api/v1/geocoding/reverse`
-
-```bash
-curl -sS -X POST http://127.0.0.1:8080/api/v1/geocoding/reverse \
-  -H 'Content-Type: application/json' \
-  -d '{"latitude":57.8193,"longitude":28.3325,"count":1}'
-```
+Секретные токены в ответ не включаются.
 
 ## Источники
 
 ### `GET /api/v1/sources`
+
+Возвращает зарегистрированные адаптеры:
 
 ```bash
 curl -sS http://127.0.0.1:8080/api/v1/sources \
   | python3 -m json.tool
 ```
 
-Для каждого адаптера возвращаются:
+Для каждого источника доступны:
+
+- `source_id`;
+- поставщик;
+- модель;
+- тип `deterministic`, `ensemble` или `synthetic`;
+- горизонт;
+- наличие точного цикла;
+- краткое назначение.
+
+## Часовые пояса
+
+### `POST /api/v1/timezone/resolve`
+
+Локальное определение IANA timezone по координатам:
+
+```bash
+curl -sS -X POST \
+  http://127.0.0.1:8080/api/v1/timezone/resolve \
+  -H 'Content-Type: application/json' \
+  -d '{"latitude":60.1699,"longitude":24.9384}'
+```
+
+Ответ:
 
 ```json
 {
-  "source_id": "open_meteo_gefs_0p25",
-  "name": "NOAA GEFS 0.25° через Open-Meteo",
-  "provider": "Open-Meteo / NOAA",
-  "model": "NOAA GEFS 0.25°",
-  "horizon_days": 10,
-  "exact_cycle": false,
-  "source_kind": "ensemble",
-  "implementation_status": "ready"
+  "timezone": "Europe/Helsinki",
+  "source": "coordinates",
+  "used_fallback": false
 }
 ```
 
-`source_kind` принимает:
+Метод не требует Интернета.
 
-```text
-deterministic
-ensemble
-synthetic
+## Геокодирование и предварительный импорт
+
+### `POST /api/v1/geocoding/suggest`
+
+Интерактивные кандидаты DaData:
+
+```json
+{
+  "query": "Псков",
+  "count": 5
+}
 ```
 
-## Справочник координат
+### `POST /api/v1/geocoding/resolve`
+
+Определение одного города или адреса:
+
+```json
+{
+  "query": "Псков, Октябрьский проспект, 15",
+  "automatic": false
+}
+```
+
+### `POST /api/v1/geocoding/reverse`
+
+Обратное геокодирование координат.
+
+### `POST /api/v1/geocoding/parse-file`
+
+Единый серверный разбор TXT, CSV или JSON без записи в справочник:
+
+```json
+{
+  "filename": "locations.csv",
+  "content": "name;latitude;longitude\nХельсинки;60.1699;24.9384\n",
+  "max_locations": 1000
+}
+```
+
+Ответ:
+
+```json
+{
+  "locations": [
+    {
+      "id": "csv-1",
+      "name": "Хельсинки",
+      "latitude": 60.1699,
+      "longitude": 24.9384,
+      "timezone": "Europe/Helsinki",
+      "timezone_source": "coordinates"
+    }
+  ],
+  "warnings": []
+}
+```
+
+Ошибочная строка не блокирует корректные точки. Сохранение выполняется отдельным запросом только после подтверждения оператора.
+
+## Справочник точек
 
 ### `GET /api/v1/locations`
 
 Параметры:
 
-- `group` — необязательная группа;
-- `limit` — от 1 до 10000.
+- `group` — точное имя группы;
+- `limit` — от 1 до 10 000.
 
 ### `POST /api/v1/locations`
 
-```json
-{
-  "id": "pskov",
-  "name": "Псков",
-  "latitude": 57.8193,
-  "longitude": 28.3325,
-  "elevation_m": 45,
-  "timezone": "Europe/Moscow",
-  "group": "Основные",
-  "output_name": null
-}
-```
+Создать точку.
 
 ### `GET /api/v1/locations/{location_id}`
 
+Получить точку.
+
 ### `PUT /api/v1/locations/{location_id}`
+
+Полностью заменить точку.
 
 ### `DELETE /api/v1/locations/{location_id}`
 
+Удалить точку.
+
 ### `POST /api/v1/locations/import`
+
+Сохранить подтверждённый набор:
 
 ```json
 {
-  "replace_existing": false,
   "locations": [
     {
-      "id": "pskov",
-      "name": "Псков",
-      "latitude": 57.8193,
-      "longitude": 28.3325,
-      "timezone": "Europe/Moscow"
+      "id": "helsinki",
+      "name": "Хельсинки",
+      "latitude": 60.1699,
+      "longitude": 24.9384,
+      "timezone": "Europe/Helsinki",
+      "timezone_source": "coordinates"
     }
-  ]
+  ],
+  "replace_existing": false
 }
-```
-
-### `GET /api/v1/locations/export`
-
-Совместимый адрес:
-
-```text
-/api/v1/location-catalog/export
 ```
 
 ## Задания
 
 ### `POST /api/v1/jobs`
 
-Пример с двумя детерминированными моделями и одним ансамблем:
+Создать задание:
 
 ```json
 {
   "batch_name": "forecast_for_objects",
   "locations": [
     {
-      "id": "pskov",
-      "name": "Псков",
-      "latitude": 57.8193,
-      "longitude": 28.3325,
-      "timezone": "Europe/Moscow"
+      "id": "spb-office",
+      "name": "Санкт-Петербург, объект 1",
+      "latitude": 59.9386,
+      "longitude": 30.3141,
+      "elevation_m": 12,
+      "timezone": "Europe/Moscow",
+      "timezone_source": "coordinates"
     }
   ],
   "sources": [
@@ -198,37 +248,24 @@ synthetic
       "options": {}
     },
     {
-      "source_id": "open_meteo_ecmwf_ifs",
-      "forecast_days": 7,
-      "options": {}
-    },
-    {
       "source_id": "open_meteo_gefs_0p25",
       "forecast_days": 7,
       "options": {
-        "precipitation_thresholds_mm": [0.1, 1.0, 5.0]
+        "precipitation_thresholds_mm": [0.1, 1, 5]
       }
     }
   ],
   "document": {
     "title": "Метеорологический прогноз",
     "page_size": "A3",
-    "summary_interval_hours": 3,
-    "extended_summary_interval_hours": 6,
-    "summary_switch_hour": 120,
-    "ensemble_interval_hours": 6,
-    "ensemble_extended_interval_hours": 12,
-    "ensemble_switch_hour": 120,
-    "include_detailed_table": true,
-    "include_all_parameters": true,
-    "include_ensemble_section": true,
     "parameter_profile": "extended",
-    "language": "ru"
+    "include_detailed_table": true,
+    "include_ensemble_section": true
   }
 }
 ```
 
-Результирующий DOCX всегда располагает детерминированные модели первыми. Все ансамблевые источники выводятся одной отдельной таблицей в конце.
+Перед сохранением задания API перепроверяет точки с `timezone_source=system_default` по координатам.
 
 ### `GET /api/v1/jobs`
 
@@ -237,54 +274,52 @@ synthetic
 - `limit` — от 1 до 1000;
 - `status` — `queued`, `running`, `completed`, `partial`, `failed`, `cancelled`.
 
+Запись задания содержит:
+
+```text
+worker_id
+lease_expires_at_utc
+attempt_count
+progress_current
+progress_total
+progress_message
+```
+
 ### `GET /api/v1/jobs/{job_id}`
 
-Возвращает запрос, статус, ошибки, предупреждения и артефакты.
+Получить полное состояние, ошибки и артефакты.
 
 ### `POST /api/v1/jobs/{job_id}/cancel`
 
+Отменить ожидающее или выполняющееся задание. Worker получает отмену по heartbeat и прекращает активные асинхронные операции. Результат старого выполнения не может перезаписать новое.
+
 ### `POST /api/v1/jobs/{job_id}/retry`
+
+Создать новую задачу на основе завершённой, частичной, ошибочной или отменённой.
 
 ## Артефакты
 
 ### `GET /api/v1/jobs/{job_id}/artifacts/{artifact_index}`
 
-Виды:
+Выдаёт:
 
-```text
-docx
-manifest
-zip
-```
+- DOCX;
+- `manifest.json`;
+- ZIP.
 
-Пример:
+Путь проверяется относительно каталога документов, поэтому произвольный файл системы скачать нельзя.
 
 ```bash
 curl -fLo result.docx \
   http://127.0.0.1:8080/api/v1/jobs/JOB_ID/artifacts/0
 ```
 
-Путь проверяется относительно каталога документов. Произвольный системный файл через этот метод получить нельзя.
+## Ошибки
 
-## Коды ошибок
-
-| Код | Значение |
-|---:|---|
-| 403 | недопустимый путь или ограничение доступа |
-| 404 | точка, задание, кандидат или артефакт не найден |
-| 409 | конфликт идентификатора или недопустимое состояние |
-| 422 | ошибка структуры данных |
-| 502 | внешний сервис DaData или источник прогноза недоступен |
-| 503 | интеграция не настроена |
-
-## Доступ из сети
-
-Приложение не реализует собственную корпоративную аутентификацию. По умолчанию API слушает `127.0.0.1`.
-
-Для сетевого доступа используйте Nginx или HAProxy с:
-
-- TLS;
-- ограничением адресов;
-- принятой в организации аутентификацией;
-- лимитами размера запросов;
-- журналом доступа.
+- `403` — запрещён путь или операция;
+- `404` — точка, задание или артефакт не найдены;
+- `409` — конфликт идентификатора или состояния;
+- `422` — некорректная структура, координаты или режим документа;
+- `502` — внешний сервис отклонил запрос;
+- `503` — требуемая интеграция не настроена;
+- `500` — непредвиденная ошибка приложения.

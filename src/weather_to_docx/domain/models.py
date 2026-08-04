@@ -27,6 +27,23 @@ class SourceKind(StrEnum):
     SYNTHETIC = "synthetic"
 
 
+class TimezoneSource(StrEnum):
+    """Происхождение часового пояса точки."""
+
+    EXPLICIT = "explicit"
+    COORDINATES = "coordinates"
+    GEOCODER = "geocoder"
+    SYSTEM_DEFAULT = "system_default"
+
+
+class LeadTimeReference(StrEnum):
+    """От какой временной точки отсчитывается `lead_hours`."""
+
+    CYCLE = "cycle"
+    RESPONSE_START = "response_start"
+    UNKNOWN = "unknown"
+
+
 class JobStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -45,6 +62,7 @@ class Location(BaseModel):
     longitude: float = Field(ge=-180, le=180)
     elevation_m: float | None = Field(default=None, ge=-500, le=9000)
     timezone: str = "UTC"
+    timezone_source: TimezoneSource = TimezoneSource.EXPLICIT
     group: str | None = Field(default=None, max_length=250)
     output_name: str | None = Field(default=None, max_length=250)
 
@@ -68,6 +86,19 @@ class ForecastValue(BaseModel):
     note: str | None = None
     source_start_step: int | None = None
     source_end_step: int | None = None
+    sample_count: int | None = Field(default=None, ge=1)
+    event_count: int | None = Field(default=None, ge=0)
+    accumulation_hours: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_event_count(self) -> ForecastValue:
+        if (
+            self.sample_count is not None
+            and self.event_count is not None
+            and self.event_count > self.sample_count
+        ):
+            raise ValueError("Число событий не может превышать размер выборки")
+        return self
 
 
 class SourceMetadata(BaseModel):
@@ -82,6 +113,7 @@ class SourceMetadata(BaseModel):
     retrieved_at_utc: datetime
     horizon_hours: int | None = None
     native_time_step_hours: float | None = None
+    lead_time_reference: LeadTimeReference = LeadTimeReference.CYCLE
     grid_type: str | None = None
     spatial_resolution: str | None = None
     grid_latitude: float | None = None
@@ -91,7 +123,7 @@ class SourceMetadata(BaseModel):
     licence: str | None = None
     source_reference: str | None = None
     attribution: str | None = None
-    adapter_version: str = "0.3.0"
+    adapter_version: str = "0.3.1"
     exact_cycle_known: bool = True
 
     ensemble_member_count: int | None = Field(default=None, ge=1)
@@ -101,6 +133,18 @@ class SourceMetadata(BaseModel):
     primary_statistic_policy: str | None = None
     quantile_method: str | None = None
     probability_calibration: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def infer_legacy_lead_reference(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "lead_time_reference" not in value:
+            value = dict(value)
+            value["lead_time_reference"] = (
+                LeadTimeReference.CYCLE.value
+                if value.get("exact_cycle_known", True)
+                else LeadTimeReference.RESPONSE_START.value
+            )
+        return value
 
     @field_validator("cycle_time_utc", "retrieved_at_utc")
     @classmethod
@@ -122,12 +166,16 @@ class SourceMetadata(BaseModel):
             and self.source_kind == SourceKind.DETERMINISTIC
             and _looks_like_legacy_ensemble(self.source_id, self.model, self.product)
         ):
-            # Пакеты 0.2.x не содержали source_kind, но уже могли содержать N.
             self.source_kind = SourceKind.ENSEMBLE
         elif has_ensemble_metadata and self.source_kind != SourceKind.ENSEMBLE:
             raise ValueError(
                 "Число членов и полнота допустимы только для ансамблевого источника"
             )
+        if (
+            self.lead_time_reference == LeadTimeReference.CYCLE
+            and not self.exact_cycle_known
+        ):
+            self.lead_time_reference = LeadTimeReference.RESPONSE_START
         return self
 
 
@@ -256,6 +304,19 @@ class JobRecord(BaseModel):
     error: str | None = None
     created_at_utc: datetime
     updated_at_utc: datetime
+    worker_id: str | None = None
+    lease_expires_at_utc: datetime | None = None
+    attempt_count: int = Field(default=0, ge=0)
+    progress_current: int = Field(default=0, ge=0)
+    progress_total: int = Field(default=0, ge=0)
+    progress_message: str | None = None
+
+    @field_validator("created_at_utc", "updated_at_utc", "lease_expires_at_utc")
+    @classmethod
+    def validate_job_datetime(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("Дата задания должна содержать часовой пояс")
+        return value
 
 
 def _looks_like_legacy_ensemble(source_id: str, model: str, product: str) -> bool:

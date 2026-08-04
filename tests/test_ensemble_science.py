@@ -4,9 +4,14 @@ from datetime import UTC, datetime
 
 import pytest
 
-from weather_to_docx.domain.models import SourceKind, SourceMetadata
+from weather_to_docx.domain.models import (
+    LeadTimeReference,
+    SourceKind,
+    SourceMetadata,
+)
 from weather_to_docx.ensemble.science import (
     circular_mean_degrees,
+    circular_statistics,
     ensemble_statistics,
     primary_centre,
     probability_resolution,
@@ -56,7 +61,17 @@ def test_raw_probability_and_resolution() -> None:
 
 def test_circular_mean_does_not_average_north_to_south() -> None:
     direction = circular_mean_degrees([350.0, 0.0, 10.0])
+    assert direction is not None
     assert min(abs(direction), abs(direction - 360.0)) < 1e-8
+    statistics = circular_statistics([350.0, 0.0, 10.0])
+    assert statistics.resultant_length > 0.98
+
+
+def test_circular_mean_is_undefined_for_cancelled_directions() -> None:
+    statistics = circular_statistics([0.0, 90.0, 180.0, 270.0])
+    assert statistics.mean_degrees is None
+    assert statistics.resultant_length == pytest.approx(0.0, abs=1e-12)
+    assert circular_mean_degrees([0.0, 90.0, 180.0, 270.0]) is None
 
 
 def test_legacy_ensemble_metadata_is_upgraded() -> None:
@@ -69,6 +84,20 @@ def test_legacy_ensemble_metadata_is_upgraded() -> None:
         ensemble_member_count=31,
     )
     assert metadata.source_kind is SourceKind.ENSEMBLE
+
+
+def test_legacy_unknown_cycle_uses_response_start_reference() -> None:
+    metadata = SourceMetadata.model_validate(
+        {
+            "source_id": "open_meteo_gfs",
+            "provider": "Open-Meteo / NOAA",
+            "model": "NOAA GFS",
+            "product": "hourly point forecast",
+            "retrieved_at_utc": datetime(2026, 8, 4, tzinfo=UTC),
+            "exact_cycle_known": False,
+        }
+    )
+    assert metadata.lead_time_reference is LeadTimeReference.RESPONSE_START
 
 
 def test_unrelated_source_cannot_smuggle_ensemble_fields() -> None:

@@ -4,6 +4,52 @@ set -Eeuo pipefail
 BUNDLE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ENV_FILE=/etc/weather-to-docx/weather-to-docx.env
 CONFIGURE_COMMAND=/usr/local/sbin/weather-to-docx-configure
+KEYRING=${WTD_GPG_KEYRING:-}
+NON_INTERACTIVE=0
+SKIP_CONFIGURE=0
+
+usage() {
+  cat <<'EOF'
+Использование:
+  sudo ./setup.sh [--keyring ФАЙЛ] [--non-interactive] [--skip-configure]
+
+Параметры:
+  --keyring ФАЙЛ       доверенный GPG keyring для SHA256SUMS.sig
+  --non-interactive    не задавать вопросы; сохранить существующие настройки
+  --skip-configure     выполнить только установку без мастера настройки
+
+Примеры:
+  sudo ./setup.sh
+  sudo ./setup.sh --keyring /root/weather-release-keyring.gpg
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --keyring)
+      [[ $# -ge 2 ]] || { echo "После --keyring требуется путь" >&2; exit 2; }
+      KEYRING=$2
+      shift 2
+      ;;
+    --non-interactive)
+      NON_INTERACTIVE=1
+      shift
+      ;;
+    --skip-configure)
+      SKIP_CONFIGURE=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Неизвестный параметр: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
 
 [[ ${EUID:-$(id -u)} -eq 0 ]] || {
   echo "Ошибка: запустите sudo ./setup.sh" >&2
@@ -15,26 +61,39 @@ CONFIGURE_COMMAND=/usr/local/sbin/weather-to-docx-configure
   exit 1
 }
 
-# Базовая установка остаётся полностью автономной. Мастер токенов запускается
-# после атомарного развёртывания приложения.
+if [[ -f "$BUNDLE_DIR/SHA256SUMS.sig" && -z "$KEYRING" ]]; then
+  if [[ $NON_INTERACTIVE -eq 0 && -t 0 ]]; then
+    read -r -p "Путь к доверенному GPG keyring: " KEYRING
+  fi
+  [[ -n "$KEYRING" ]] || {
+    echo "Ошибка: комплект подписан, укажите --keyring ФАЙЛ" >&2
+    exit 3
+  }
+fi
+
+if [[ -n "$KEYRING" ]]; then
+  [[ -r "$KEYRING" ]] || {
+    echo "Ошибка: доверенный keyring не читается: $KEYRING" >&2
+    exit 3
+  }
+  export WTD_GPG_KEYRING=$KEYRING
+fi
+
 "$BUNDLE_DIR/install.sh"
 
-if [[ -x "$BUNDLE_DIR/configure.sh" ]]; then
+if [[ $SKIP_CONFIGURE -eq 0 && -x "$BUNDLE_DIR/configure.sh" ]]; then
   install -m 0750 "$BUNDLE_DIR/configure.sh" "$CONFIGURE_COMMAND"
-  if [[ -t 0 ]]; then
-    "$CONFIGURE_COMMAND" --env "$ENV_FILE" --group weatherdoc
+  if [[ $NON_INTERACTIVE -eq 1 || ! -t 0 ]]; then
+    "$CONFIGURE_COMMAND" \
+      --env "$ENV_FILE" \
+      --group weatherdoc \
+      --non-interactive
   else
-    echo "Нет интерактивного терминала: сохранены существующие настройки." >&2
-    echo "Позже выполните: sudo weather-to-docx-configure" >&2
+    "$CONFIGURE_COMMAND" --env "$ENV_FILE" --group weatherdoc
   fi
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
-  if [[ -f "$BUNDLE_DIR/systemd/weather-to-docx-telegram.service" ]]; then
-    install -m 0644 \
-      "$BUNDLE_DIR/systemd/weather-to-docx-telegram.service" \
-      /etc/systemd/system/weather-to-docx-telegram.service
-  fi
   systemctl daemon-reload
   systemctl enable weather-to-docx-api.service weather-to-docx-worker.service
   systemctl restart weather-to-docx-api.service weather-to-docx-worker.service

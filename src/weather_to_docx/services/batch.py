@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import uuid
 import zipfile
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -24,6 +26,7 @@ from weather_to_docx.sources.registry import SourceRegistry
 from weather_to_docx.utils.files import safe_filename, sha256_file
 
 LOGGER = logging.getLogger(__name__)
+ProgressCallback = Callable[[int, int, str], Awaitable[None] | None]
 
 
 class ForecastBatchService:
@@ -32,7 +35,12 @@ class ForecastBatchService:
         self.registry = registry or SourceRegistry(settings)
         self.generator = ScientificDocumentGenerator(settings.icon_cache_dir)
 
-    async def collect(self, request: BatchRequest) -> list[CollectedLocation]:
+    async def collect(
+        self,
+        request: BatchRequest,
+        *,
+        progress_callback: ProgressCallback | None = None,
+    ) -> list[CollectedLocation]:
         collected = {
             location.id: CollectedLocation(location=location)
             for location in request.locations
@@ -66,9 +74,34 @@ class ForecastBatchService:
                     )
                     return location.id, source_request.source_id, None, str(exc)
 
-        results = await asyncio.gather(
-            *(fetch_one(location, source) for location, source in pairs)
-        )
+        tasks = [
+            asyncio.create_task(fetch_one(location, source))
+            for location, source in pairs
+        ]
+        results = []
+        completed = 0
+        total = len(tasks)
+        try:
+            for future in asyncio.as_completed(tasks):
+                result = await future
+                results.append(result)
+                completed += 1
+                location_id, source_id, _, error = result
+                location_name = collected[location_id].location.name
+                state = "ошибка" if error else "готово"
+                await _notify_progress(
+                    progress_callback,
+                    completed,
+                    total,
+                    f"{location_name} / {source_id}: {state}",
+                )
+        finally:
+            pending = [task for task in tasks if not task.done()]
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+
         for location_id, source_id, forecast, error in sorted(
             results,
             key=lambda item: order[(item[0], item[1])],
@@ -86,15 +119,39 @@ class ForecastBatchService:
         *,
         output_root: Path | None = None,
         batch_id: str | None = None,
+        progress_callback: ProgressCallback | None = None,
     ) -> BatchResult:
         batch_id = batch_id or uuid.uuid4().hex
-        collected = await self.collect(request)
-        return self.generate_from_collected(
+        total = len(request.locations) * len(request.sources)
+        await _notify_progress(
+            progress_callback,
+            0,
+            total,
+            "Получение прогностических рядов",
+        )
+        collected = await self.collect(
+            request,
+            progress_callback=progress_callback,
+        )
+        await _notify_progress(
+            progress_callback,
+            total,
+            total,
+            "Формирование DOCX и архива",
+        )
+        result = self.generate_from_collected(
             request=request,
             collected=collected,
             output_root=output_root,
             batch_id=batch_id,
         )
+        await _notify_progress(
+            progress_callback,
+            total,
+            total,
+            "Документы сформированы",
+        )
+        return result
 
     def generate_from_series(
         self,
@@ -218,8 +275,6 @@ class ForecastBatchService:
             "document_composition": (
                 "deterministic model sections followed by one scientific ensemble section"
             ),
-            # Поля locations и artifacts сохраняются для совместимости с
-            # пакетами и клиентами версии 0.2.x.
             "locations": [
                 location.model_dump(mode="json")
                 for location in request.locations
@@ -280,3 +335,16 @@ class ForecastBatchService:
             size_bytes=path.stat().st_size,
             location_id=location_id,
         )
+
+
+async def _notify_progress(
+    callback: ProgressCallback | None,
+    current: int,
+    total: int,
+    message: str,
+) -> None:
+    if callback is None:
+        return
+    result = callback(current, total, message)
+    if inspect.isawaitable(result):
+        await result

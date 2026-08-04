@@ -28,3 +28,18 @@ def test_offline_builder_has_zero_exit_without_signature() -> None:
     ).read_text(encoding="utf-8")
     assert 'if [[ -f "$ARCHIVE.asc" ]]; then' in script
     assert '[[ -f "$ARCHIVE.asc" ]] &&' not in script
+
+
+def test_setup_passes_keyring_to_installer() -> None:
+    script = (ROOT / "scripts/setup.sh").read_text(encoding="utf-8")
+    assert "--keyring" in script
+    assert "export WTD_GPG_KEYRING=$KEYRING" in script
+    assert '[[ -r "$KEYRING" ]]' in script
+    assert '"$BUNDLE_DIR/install.sh"' in script
+
+
+def test_reliability_assets_are_part_of_source_tree() -> None:
+    assert (ROOT / "src/weather_to_docx/static/reliability.js").is_file()
+    assert (ROOT / "src/weather_to_docx/static/reliability.css").is_file()
+    assert (ROOT / "src/weather_to_docx/geocoding/timezone.py").is_file()
+    assert (ROOT / "src/weather_to_docx/telegram_queue_bot.py").is_file()

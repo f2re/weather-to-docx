@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "weather-to-docx"
-version = "0.3.0"
+version = "0.3.1"
 description = "Формирование профессиональных DOCX-прогнозов погоды по координатам"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -19,6 +19,7 @@ dependencies = [
   "python-docx>=1.1,<2",
   "python-telegram-bot>=22.8,<23",
   "PyYAML>=6,<7",
+  "timezonefinder>=8.2,<9",
   "typer>=0.12,<1",
   "uvicorn>=0.30,<1",
 ]
