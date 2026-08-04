@@ -3,6 +3,11 @@ from __future__ import annotations
 from weather_to_docx.settings import Settings
 from weather_to_docx.sources.base import ForecastSource, SourceDescriptor
 from weather_to_docx.sources.demo import DemoSource
+from weather_to_docx.sources.ensemble_catalog import (
+    OpenMeteoEcmwfAifsEnsembleSource,
+    OpenMeteoEcmwfIfsEnsembleSource,
+    OpenMeteoGemGepsSource,
+)
 from weather_to_docx.sources.gfs_nomads import GfsNomadsSource
 from weather_to_docx.sources.open_meteo import (
     OpenMeteoDwdIconGlobalSource,
@@ -13,11 +18,8 @@ from weather_to_docx.sources.open_meteo import (
 )
 from weather_to_docx.sources.open_meteo_ensemble import (
     OpenMeteoDwdIconEpsSource,
-    OpenMeteoEcmwfAifsEnsembleSource,
-    OpenMeteoEcmwfIfsEnsembleSource,
     OpenMeteoGefS025Source,
     OpenMeteoGefS05Source,
-    OpenMeteoGemGepsSource,
 )
 
 
