@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from telegram import Chat
 
 from weather_to_docx.domain.models import Location, SourceKind
 from weather_to_docx.settings import Settings
@@ -56,6 +58,13 @@ async def test_bot_registers_commands_and_command_menu(tmp_path: Path) -> None:
     command_names = [command.command for command in fake_bot.commands]
     assert command_names == ["forecast", "sources", "settings", "help"]
     assert fake_bot.menu_button is not None
+
+
+def test_bot_uses_supported_chat_action_shortcut() -> None:
+    assert hasattr(Chat, "send_chat_action")
+    source = inspect.getsource(TelegramForecastBot._generate_and_send)
+    assert ".send_chat_action(" in source
+    assert ".send_action(" not in source
 
 
 def test_bot_request_separates_model_and_ensemble_sources(tmp_path: Path) -> None:
