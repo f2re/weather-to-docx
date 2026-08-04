@@ -64,9 +64,27 @@
         <button id="exportLocations" class="button ghost" type="button">Экспорт JSON</button>
       </div>
 
+      <div id="importPreview" class="import-preview" hidden>
+        <div class="section-title">
+          <div><h3>Предварительная проверка импорта</h3></div>
+          <span id="importPreviewSummary" class="muted"></span>
+        </div>
+        <div id="importWarnings" class="import-warnings"></div>
+        <div class="table-wrap import-table-wrap">
+          <table class="table">
+            <thead><tr><th>Строка</th><th>Точка</th><th>Координаты</th><th>Часовой пояс</th></tr></thead>
+            <tbody id="importPreviewBody"></tbody>
+          </table>
+        </div>
+        <div class="import-actions">
+          <button id="confirmImport" class="button primary" type="button">Добавить проверенные точки</button>
+          <button id="cancelImport" class="button ghost" type="button">Отменить импорт</button>
+        </div>
+      </div>
+
       <div class="table-wrap">
         <table class="table">
-          <thead><tr><th></th><th>Точка</th><th>Координаты</th><th>Группа</th><th></th></tr></thead>
+          <thead><tr><th></th><th>Точка</th><th>Координаты и время</th><th>Группа</th><th></th></tr></thead>
           <tbody id="locationsBody"><tr><td colspan="5" class="empty">Загрузка…</td></tr></tbody>
         </table>
       </div>
