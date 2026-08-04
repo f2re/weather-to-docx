@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import httpx
 import pytest
 
-from weather_to_docx.domain.models import Location, QualityFlag
+from weather_to_docx.domain.models import Location, QualityFlag, SourceKind
 from weather_to_docx.settings import Settings
 from weather_to_docx.sources.open_meteo import (
     OpenMeteoDwdIconGlobalSource,
@@ -71,18 +71,36 @@ def test_ensemble_statistics_and_probability() -> None:
 
     point = series.points[0]
     assert point.raw("temperature_2m") == pytest.approx(12.0)
+    assert point.raw("temperature_2m_mean") == pytest.approx(12.0)
+    assert point.raw("temperature_2m_median") == pytest.approx(12.0)
     assert point.raw("temperature_2m_spread") == pytest.approx(1.632993, rel=1e-5)
-    assert point.raw("temperature_2m_p10") == pytest.approx(10.4)
-    assert point.raw("temperature_2m_p90") == pytest.approx(13.6)
+    assert point.raw("temperature_2m_p10") == pytest.approx(10.0)
+    assert point.raw("temperature_2m_p90") == pytest.approx(14.0)
+
+    # Для асимметричных неотрицательных осадков основной центр — медиана.
+    assert point.raw("precipitation") == pytest.approx(0.6)
+    assert point.raw("precipitation_median") == pytest.approx(0.6)
+    assert point.raw("precipitation_mean") == pytest.approx(0.6)
+
     assert point.raw("precipitation_probability") == pytest.approx(200 / 3)
-    assert point.measurement("precipitation_probability").quality is QualityFlag.CALCULATED
+    assert point.raw("precipitation_probability_ge_0p5mm") == pytest.approx(200 / 3)
+    probability = point.measurement("precipitation_probability")
+    assert probability.quality is QualityFlag.CALCULATED
+    assert "некалиброванная" in (probability.note or "")
     assert point.raw("ensemble_member_count") == 3
+    assert point.raw("ensemble_member_coverage") == pytest.approx(300 / 31)
+    assert point.measurement("ensemble_member_count").quality is QualityFlag.SUSPECT
+    assert point.raw("ensemble_probability_resolution") == pytest.approx(100 / 3)
     assert point.weather_code == 61
+
     direction = point.raw("wind_direction_10m")
     assert min(abs(direction), abs(direction - 360)) < 1e-6
     assert series.source.native_time_step_hours == 3
     assert series.source.model == "NOAA GEFS 0.5°"
-    assert series.source.model_dump()["ensemble_member_count"] == 3
+    assert series.source.source_kind is SourceKind.ENSEMBLE
+    assert series.source.ensemble_member_count == 3
+    assert series.source.ensemble_expected_member_count == 31
+    assert series.source.probability_calibration == "raw_uncalibrated_member_fraction"
 
 
 @pytest.mark.asyncio
@@ -110,11 +128,12 @@ async def test_deterministic_model_is_sent_explicitly() -> None:
 
     assert series.points[0].raw("temperature_2m") == 18.5
     assert series.source.model_dump()["upstream_model_id"] == "ecmwf_ifs025"
+    assert series.source.source_kind is SourceKind.DETERMINISTIC
 
 
 def test_registered_models_are_separate_sources(tmp_path) -> None:
     registry = SourceRegistry(Settings(data_dir=tmp_path))
-    source_ids = {descriptor.source_id for descriptor in registry.descriptors()}
+    descriptors = {item.source_id: item for item in registry.descriptors()}
     assert {
         "open_meteo_gfs",
         "open_meteo_ecmwf_ifs",
@@ -128,7 +147,9 @@ def test_registered_models_are_separate_sources(tmp_path) -> None:
         "open_meteo_dwd_icon_eps",
         "open_meteo_gem_geps",
         "noaa_gfs_0p25",
-    } <= source_ids
+    } <= set(descriptors)
+    assert descriptors["open_meteo_gefs_0p25"].source_kind is SourceKind.ENSEMBLE
+    assert descriptors["open_meteo_gfs"].source_kind is SourceKind.DETERMINISTIC
 
 
 def test_model_descriptors_keep_provenance() -> None:
@@ -140,3 +161,4 @@ def test_model_descriptors_keep_provenance() -> None:
     )
     assert len({descriptor.model for descriptor in descriptors}) == len(descriptors)
     assert all(descriptor.exact_cycle is False for descriptor in descriptors)
+    assert all(descriptor.source_kind is SourceKind.DETERMINISTIC for descriptor in descriptors)
