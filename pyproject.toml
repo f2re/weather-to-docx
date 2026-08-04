@@ -35,6 +35,7 @@ dev = [
 
 [project.scripts]
 weather-to-docx = "weather_to_docx.cli:app"
+weather-to-docx-api = "weather_to_docx.api_entrypoint:main"
 weather-to-docx-telegram = "weather_to_docx.telegram_entrypoint:main"
 
 [tool.hatch.build.targets.wheel]
