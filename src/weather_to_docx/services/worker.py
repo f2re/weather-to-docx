@@ -8,6 +8,7 @@ import socket
 import time
 import uuid
 
+from weather_to_docx import __version__
 from weather_to_docx.services.batch import ForecastBatchService
 from weather_to_docx.settings import Settings
 from weather_to_docx.storage.jobs import JobRepository
@@ -29,7 +30,7 @@ def run_worker(
     details = {
         "hostname": socket.gethostname(),
         "pid": os.getpid(),
-        "version": "0.3.1",
+        "version": __version__,
     }
 
     LOGGER.info("Worker started: %s", worker_id)
