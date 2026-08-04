@@ -153,4 +153,6 @@ fi
 echo "==> Офлайн-комплект готов"
 echo "    $ARCHIVE"
 echo "    $ARCHIVE.sha256"
-[[ -f "$ARCHIVE.asc" ]] && echo "    $ARCHIVE.asc"
+if [[ -f "$ARCHIVE.asc" ]]; then
+  echo "    $ARCHIVE.asc"
+fi
