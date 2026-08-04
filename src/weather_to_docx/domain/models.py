@@ -27,6 +27,15 @@ class SourceKind(StrEnum):
     SYNTHETIC = "synthetic"
 
 
+class TimezoneSource(StrEnum):
+    """Происхождение часового пояса точки."""
+
+    EXPLICIT = "explicit"
+    COORDINATES = "coordinates"
+    GEOCODER = "geocoder"
+    SYSTEM_DEFAULT = "system_default"
+
+
 class JobStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -45,6 +54,7 @@ class Location(BaseModel):
     longitude: float = Field(ge=-180, le=180)
     elevation_m: float | None = Field(default=None, ge=-500, le=9000)
     timezone: str = "UTC"
+    timezone_source: TimezoneSource = TimezoneSource.EXPLICIT
     group: str | None = Field(default=None, max_length=250)
     output_name: str | None = Field(default=None, max_length=250)
 
@@ -91,7 +101,7 @@ class SourceMetadata(BaseModel):
     licence: str | None = None
     source_reference: str | None = None
     attribution: str | None = None
-    adapter_version: str = "0.3.0"
+    adapter_version: str = "0.3.1"
     exact_cycle_known: bool = True
 
     ensemble_member_count: int | None = Field(default=None, ge=1)
@@ -122,7 +132,6 @@ class SourceMetadata(BaseModel):
             and self.source_kind == SourceKind.DETERMINISTIC
             and _looks_like_legacy_ensemble(self.source_id, self.model, self.product)
         ):
-            # Пакеты 0.2.x не содержали source_kind, но уже могли содержать N.
             self.source_kind = SourceKind.ENSEMBLE
         elif has_ensemble_metadata and self.source_kind != SourceKind.ENSEMBLE:
             raise ValueError(
@@ -256,6 +265,19 @@ class JobRecord(BaseModel):
     error: str | None = None
     created_at_utc: datetime
     updated_at_utc: datetime
+    worker_id: str | None = None
+    lease_expires_at_utc: datetime | None = None
+    attempt_count: int = Field(default=0, ge=0)
+    progress_current: int = Field(default=0, ge=0)
+    progress_total: int = Field(default=0, ge=0)
+    progress_message: str | None = None
+
+    @field_validator("created_at_utc", "updated_at_utc", "lease_expires_at_utc")
+    @classmethod
+    def validate_job_datetime(cls, value: datetime | None) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            raise ValueError("Дата задания должна содержать часовой пояс")
+        return value
 
 
 def _looks_like_legacy_ensemble(source_id: str, model: str, product: str) -> bool:
