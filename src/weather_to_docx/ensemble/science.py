@@ -44,6 +44,20 @@ class EnsembleStatistics:
         return self.p90 - self.p10
 
 
+@dataclass(frozen=True, slots=True)
+class CircularStatistics:
+    """Статистика направления на единичной окружности.
+
+    `resultant_length` R находится от 0 до 1. R≈1 означает согласованное
+    направление, R≈0 — взаимную компенсацию направлений. В последнем случае
+    среднее направление физически не определено и `mean_degrees` равно None.
+    """
+
+    count: int
+    mean_degrees: float | None
+    resultant_length: float
+
+
 def finite_values(values: Iterable[float]) -> list[float]:
     return [float(value) for value in values if math.isfinite(float(value))]
 
@@ -84,16 +98,49 @@ def probability_resolution(member_count: int) -> float:
     return 100.0 / member_count
 
 
-def circular_mean_degrees(values: Iterable[float]) -> float:
+def circular_statistics(
+    values: Iterable[float],
+    *,
+    minimum_resultant_length: float = 1e-6,
+) -> CircularStatistics:
+    """Вычислить круговое среднее и длину результирующего вектора.
+
+    Арифметическое среднее углов неприменимо на границе 0/360°. При почти
+    нулевой длине результирующего вектора направления не согласованы, поэтому
+    функция возвращает `mean_degrees=None`, а не произвольный первый член.
+    """
+
+    if not 0 <= minimum_resultant_length <= 1:
+        raise ValueError("Минимальная длина результирующего вектора должна быть от 0 до 1")
     sample = finite_values(values)
     if not sample:
         raise ValueError("Нельзя вычислить направление без членов ансамбля")
     radians = [math.radians(value % 360.0) for value in sample]
     sine = statistics.fmean(math.sin(value) for value in radians)
     cosine = statistics.fmean(math.cos(value) for value in radians)
-    if abs(sine) < 1e-12 and abs(cosine) < 1e-12:
-        return sample[0] % 360.0
-    return math.degrees(math.atan2(sine, cosine)) % 360.0
+    resultant = min(1.0, math.hypot(sine, cosine))
+    mean = (
+        math.degrees(math.atan2(sine, cosine)) % 360.0
+        if resultant >= minimum_resultant_length
+        else None
+    )
+    return CircularStatistics(
+        count=len(sample),
+        mean_degrees=mean,
+        resultant_length=resultant,
+    )
+
+
+def circular_mean_degrees(values: Iterable[float]) -> float | None:
+    """Совместимый помощник: вернуть направление или None при несогласованности."""
+
+    return circular_statistics(values).mean_degrees
+
+
+def circular_resultant_length(values: Iterable[float]) -> float:
+    """Вернуть R — меру согласованности направлений от 0 до 1."""
+
+    return circular_statistics(values).resultant_length
 
 
 def quantile_type8(values: Iterable[float], probability: float) -> float:
