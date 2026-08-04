@@ -17,7 +17,11 @@ RELEASE_DIR=$RELEASES_DIR/$VERSION
 STAGE_DIR=$RELEASES_DIR/.install-$VERSION-$$
 OLD_TARGET=""
 SWITCHED=0
-SERVICES=(weather-to-docx-api.service weather-to-docx-worker.service)
+SERVICES=(
+  weather-to-docx-api.service
+  weather-to-docx-worker.service
+  weather-to-docx-telegram.service
+)
 
 fatal() {
   echo "Ошибка: $*" >&2
@@ -54,9 +58,12 @@ verify_bundle() {
     sha256sum -c SHA256SUMS
   )
   if [[ -f "$BUNDLE_DIR/SHA256SUMS.sig" ]]; then
-    [[ -n ${WTD_GPG_KEYRING:-} ]] || fatal "комплект подписан; задайте WTD_GPG_KEYRING с доверенным keyring"
-    command -v gpgv >/dev/null 2>&1 || fatal "для проверки подписи требуется gpgv"
-    gpgv --keyring "$WTD_GPG_KEYRING" "$BUNDLE_DIR/SHA256SUMS.sig" "$BUNDLE_DIR/SHA256SUMS"
+    [[ -n ${WTD_GPG_KEYRING:-} ]] || fatal \
+      "комплект подписан; задайте WTD_GPG_KEYRING с доверенным keyring"
+    command -v gpgv >/dev/null 2>&1 || fatal \
+      "для проверки подписи требуется gpgv"
+    gpgv --keyring "$WTD_GPG_KEYRING" \
+      "$BUNDLE_DIR/SHA256SUMS.sig" "$BUNDLE_DIR/SHA256SUMS"
   fi
 }
 
@@ -66,25 +73,32 @@ check_platform() {
   . /etc/os-release
   if [[ ${WTD_ALLOW_NON_ASTRA:-0} != 1 ]]; then
     local identity="${ID:-} ${ID_LIKE:-} ${NAME:-}"
-    [[ ${identity,,} == *astra* ]] || fatal "целевая система не распознана как Astra Linux; для стенда задайте WTD_ALLOW_NON_ASTRA=1"
+    [[ ${identity,,} == *astra* ]] || fatal \
+      "целевая система не распознана как Astra Linux; для стенда задайте WTD_ALLOW_NON_ASTRA=1"
   fi
   local bundle_arch
-  bundle_arch=$(sed -n 's/.*"architecture"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$BUNDLE_DIR/build-info.json" | head -1)
+  bundle_arch=$(sed -n \
+    's/.*"architecture"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' \
+    "$BUNDLE_DIR/build-info.json" | head -1)
   local host_arch
   host_arch=$(dpkg --print-architecture 2>/dev/null || uname -m)
-  [[ -z "$bundle_arch" || "$bundle_arch" == "$host_arch" ]] \
-    || fatal "архитектура комплекта $bundle_arch не совпадает с системой $host_arch"
+  [[ -z "$bundle_arch" || "$bundle_arch" == "$host_arch" ]] || fatal \
+    "архитектура комплекта $bundle_arch не совпадает с системой $host_arch"
 }
 
 install_local_apt_repository() {
-  [[ -d "$BUNDLE_DIR/apt-repository" && -f "$BUNDLE_DIR/apt-repository/Packages" ]] || return 0
-  command -v apt-get >/dev/null 2>&1 || fatal "в комплекте есть APT-репозиторий, но apt-get недоступен"
+  [[ -d "$BUNDLE_DIR/apt-repository" \
+    && -f "$BUNDLE_DIR/apt-repository/Packages" ]] || return 0
+  command -v apt-get >/dev/null 2>&1 || fatal \
+    "в комплекте есть APT-репозиторий, но apt-get недоступен"
   local list_file
   list_file=$(mktemp -t weather-to-docx-sources-XXXXXX.list)
-  printf 'deb [trusted=yes] file:%s ./\n' "$BUNDLE_DIR/apt-repository" > "$list_file"
+  printf 'deb [trusted=yes] file:%s ./\n' \
+    "$BUNDLE_DIR/apt-repository" > "$list_file"
   local packages=""
   if [[ -f "$BUNDLE_DIR/apt-repository/requested-packages.txt" ]]; then
-    packages=$(tr '\n' ' ' < "$BUNDLE_DIR/apt-repository/requested-packages.txt")
+    packages=$(tr '\n' ' ' \
+      < "$BUNDLE_DIR/apt-repository/requested-packages.txt")
   fi
   echo "==> Установка системных пакетов только из вложенного APT-репозитория"
   apt-get \
@@ -116,11 +130,17 @@ install_runtime() {
 select_python() {
   local candidates=()
   [[ -n ${WTD_PYTHON:-} ]] && candidates+=("$WTD_PYTHON")
-  while IFS= read -r candidate; do candidates+=("$candidate"); done < <(
-    find "$OPT_ROOT/runtime" -type f \( -name python3.11 -o -name python3 \) -perm -0100 2>/dev/null | sort
+  while IFS= read -r candidate; do
+    candidates+=("$candidate")
+  done < <(
+    find "$OPT_ROOT/runtime" -type f \
+      \( -name python3.11 -o -name python3 \) \
+      -perm -0100 2>/dev/null | sort
   )
-  command -v python3.11 >/dev/null 2>&1 && candidates+=("$(command -v python3.11)")
-  command -v python3 >/dev/null 2>&1 && candidates+=("$(command -v python3)")
+  command -v python3.11 >/dev/null 2>&1 \
+    && candidates+=("$(command -v python3.11)")
+  command -v python3 >/dev/null 2>&1 \
+    && candidates+=("$(command -v python3)")
 
   local candidate
   for candidate in "${candidates[@]}"; do
@@ -138,15 +158,17 @@ PY
 }
 
 create_account_and_directories() {
-  getent group "$SERVICE_GROUP" >/dev/null || groupadd --system "$SERVICE_GROUP"
+  getent group "$SERVICE_GROUP" >/dev/null \
+    || groupadd --system "$SERVICE_GROUP"
   id "$SERVICE_USER" >/dev/null 2>&1 || useradd \
     --system --gid "$SERVICE_GROUP" --home-dir "$DATA_DIR" \
     --shell /usr/sbin/nologin "$SERVICE_USER"
 
-  install -d -m 0755 "$OPT_ROOT" "$RELEASES_DIR" "$ETC_DIR" "$ETC_DIR/keys"
+  install -d -m 0755 \
+    "$OPT_ROOT" "$RELEASES_DIR" "$ETC_DIR" "$ETC_DIR/keys"
   install -d -o "$SERVICE_USER" -g "$SERVICE_GROUP" -m 0750 \
-    "$DATA_DIR" "$DATA_DIR/database" "$DATA_DIR/cache" "$DATA_DIR/documents" \
-    "$DATA_DIR/incoming" "$BACKUP_DIR"
+    "$DATA_DIR" "$DATA_DIR/database" "$DATA_DIR/cache" \
+    "$DATA_DIR/documents" "$DATA_DIR/incoming" "$BACKUP_DIR"
 }
 
 stop_services_and_backup() {
@@ -159,8 +181,10 @@ stop_services_and_backup() {
   if [[ -f "$database" ]]; then
     local stamp
     stamp=$(date -u +%Y%m%dT%H%M%SZ)
-    tar -C "$DATA_DIR" -czf "$BACKUP_DIR/database-$stamp.tar.gz" database
-    chown "$SERVICE_USER:$SERVICE_GROUP" "$BACKUP_DIR/database-$stamp.tar.gz"
+    tar -C "$DATA_DIR" -czf \
+      "$BACKUP_DIR/database-$stamp.tar.gz" database
+    chown "$SERVICE_USER:$SERVICE_GROUP" \
+      "$BACKUP_DIR/database-$stamp.tar.gz"
     chmod 0640 "$BACKUP_DIR/database-$stamp.tar.gz"
   fi
 }
@@ -168,13 +192,15 @@ stop_services_and_backup() {
 install_release() {
   [[ -d "$BUNDLE_DIR/wheelhouse" ]] || fatal "отсутствует wheelhouse"
   if [[ -e "$RELEASE_DIR" ]]; then
-    [[ ${WTD_REINSTALL:-0} == 1 ]] || fatal "релиз $VERSION уже существует; для осознанной переустановки задайте WTD_REINSTALL=1"
-    [[ "$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)" != "$RELEASE_DIR" ]] \
-      || fatal "нельзя удалить текущий релиз при переустановке"
+    [[ ${WTD_REINSTALL:-0} == 1 ]] || fatal \
+      "релиз $VERSION уже существует; для осознанной переустановки задайте WTD_REINSTALL=1"
+    [[ "$(readlink -f "$CURRENT_LINK" 2>/dev/null || true)" \
+      != "$RELEASE_DIR" ]] || fatal \
+      "нельзя удалить текущий релиз при переустановке"
     rm -rf "$RELEASE_DIR"
   fi
   rm -rf "$STAGE_DIR"
-  mkdir -p "$STAGE_DIR/share" "$STAGE_DIR/bin"
+  mkdir -p "$STAGE_DIR/share/scripts" "$STAGE_DIR/bin"
 
   local python_bin
   python_bin=$(select_python)
@@ -189,8 +215,12 @@ install_release() {
     --find-links "$BUNDLE_DIR/wheelhouse" \
     "$package_spec"
 
-  cp -a "$BUNDLE_DIR/docs" "$BUNDLE_DIR/config" "$BUNDLE_DIR/examples" "$STAGE_DIR/share/"
-  cp "$BUNDLE_DIR/README.md" "$BUNDLE_DIR/CHANGELOG.md" "$BUNDLE_DIR/THIRD_PARTY_NOTICES.md" "$STAGE_DIR/share/"
+  cp -a "$BUNDLE_DIR/docs" "$BUNDLE_DIR/config" \
+    "$BUNDLE_DIR/examples" "$STAGE_DIR/share/"
+  cp "$BUNDLE_DIR/README.md" "$BUNDLE_DIR/CHANGELOG.md" \
+    "$BUNDLE_DIR/THIRD_PARTY_NOTICES.md" "$STAGE_DIR/share/"
+  cp "$BUNDLE_DIR/configure.sh" "$STAGE_DIR/share/scripts/configure.sh"
+  chmod 0750 "$STAGE_DIR/share/scripts/configure.sh"
   cp "$BUNDLE_DIR/rollback.sh" "$STAGE_DIR/bin/rollback-release"
   chmod 0755 "$STAGE_DIR/bin/rollback-release"
   printf '%s\n' "$VERSION" > "$STAGE_DIR/VERSION"
@@ -201,11 +231,14 @@ install_release() {
 
 install_configuration() {
   if [[ ! -f "$ETC_DIR/weather-to-docx.env" ]]; then
-    cp "$BUNDLE_DIR/weather-to-docx.env.example" "$ETC_DIR/weather-to-docx.env"
+    cp "$BUNDLE_DIR/weather-to-docx.env.example" \
+      "$ETC_DIR/weather-to-docx.env"
   fi
   chown root:"$SERVICE_GROUP" "$ETC_DIR/weather-to-docx.env"
   chmod 0640 "$ETC_DIR/weather-to-docx.env"
   chmod 0750 "$ETC_DIR/keys"
+  install -m 0750 "$BUNDLE_DIR/configure.sh" \
+    /usr/local/sbin/weather-to-docx-configure
 }
 
 switch_release() {
@@ -224,10 +257,14 @@ install_services() {
     echo "Предупреждение: systemd не найден; службы не установлены." >&2
     return 0
   fi
-  install -m 0644 "$BUNDLE_DIR/systemd/weather-to-docx-api.service" /etc/systemd/system/
-  install -m 0644 "$BUNDLE_DIR/systemd/weather-to-docx-worker.service" /etc/systemd/system/
+  local unit
+  for unit in "$BUNDLE_DIR"/systemd/*.service; do
+    [[ -f "$unit" ]] || continue
+    install -m 0644 "$unit" /etc/systemd/system/
+  done
   systemctl daemon-reload
-  systemctl enable weather-to-docx-api.service weather-to-docx-worker.service
+  systemctl enable weather-to-docx-api.service \
+    weather-to-docx-worker.service
 }
 
 initialise_and_validate() {
@@ -240,9 +277,25 @@ initialise_and_validate() {
     "${command[@]}" doctor --deep
 }
 
+telegram_is_enabled() {
+  local value
+  value=$(sed -n 's/^WTD_TELEGRAM_ENABLED=//p' \
+    "$ETC_DIR/weather-to-docx.env" | tail -1 | tr -d '"' || true)
+  [[ ${value,,} == true ]]
+}
+
 start_services() {
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl restart weather-to-docx-api.service weather-to-docx-worker.service
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return 0
+  fi
+  systemctl restart weather-to-docx-api.service \
+    weather-to-docx-worker.service
+  if telegram_is_enabled; then
+    systemctl enable weather-to-docx-telegram.service
+    systemctl restart weather-to-docx-telegram.service
+  else
+    systemctl disable --now weather-to-docx-telegram.service \
+      >/dev/null 2>&1 || true
   fi
 }
 
@@ -265,3 +318,4 @@ echo "==> Weather to DOCX $VERSION установлен"
 echo "    Текущий релиз: $CURRENT_LINK -> $(readlink -f "$CURRENT_LINK")"
 echo "    Данные: $DATA_DIR"
 echo "    Настройки: $ETC_DIR/weather-to-docx.env"
+echo "    Мастер: sudo weather-to-docx-configure"
