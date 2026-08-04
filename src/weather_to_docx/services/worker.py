@@ -83,9 +83,6 @@ def run_worker(
                 try:
                     repository.complete(job.id, result, worker_id=worker_id)
                 except (RuntimeError, KeyError) as exc:
-                    # Другой worker уже мог вернуть просроченное задание в
-                    # очередь и получить новую аренду. Старый результат нельзя
-                    # записывать поверх более нового выполнения.
                     LOGGER.warning(
                         "Job %s result discarded after lease loss: %s",
                         job.id,
@@ -115,7 +112,26 @@ async def _run_with_heartbeat(
     job_id: str,
     request,
 ):
-    task = asyncio.create_task(service.generate(request, batch_id=job_id))
+    async def progress(current: int, total: int, message: str) -> None:
+        if not repository.heartbeat(
+            job_id,
+            worker_id=worker_id,
+            lease_seconds=settings.worker_lease_seconds,
+            progress_current=current,
+            progress_total=total,
+            progress_message=message,
+        ):
+            raise RuntimeError(
+                "Worker потерял аренду задания при обновлении прогресса"
+            )
+
+    task = asyncio.create_task(
+        service.generate(
+            request,
+            batch_id=job_id,
+            progress_callback=progress,
+        )
+    )
     interval = max(1.0, settings.worker_heartbeat_seconds)
     try:
         while not task.done():
@@ -130,7 +146,6 @@ async def _run_with_heartbeat(
                 job_id,
                 worker_id=worker_id,
                 lease_seconds=settings.worker_lease_seconds,
-                progress_message="Получение прогнозов и формирование документов",
             ):
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
