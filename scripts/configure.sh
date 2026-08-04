@@ -5,6 +5,8 @@ ENV_FILE=/etc/weather-to-docx/weather-to-docx.env
 NON_INTERACTIVE=0
 SERVICE_GROUP=weatherdoc
 PYTHON_BIN=${WTD_CONFIGURE_PYTHON:-/opt/weather-to-docx/current/venv/bin/python}
+COMMITTED=0
+BACKUP_FILE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -33,7 +35,7 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
   PYTHON_BIN=$(command -v python3 || true)
 fi
 [[ -x "$PYTHON_BIN" ]] || {
-  echo "Ошибка: не найден Python для безопасной записи EnvironmentFile" >&2
+  echo "Ошибка: не найден Python для проверки настроек" >&2
   exit 1
 }
 
@@ -41,10 +43,21 @@ mkdir -p "$(dirname "$ENV_FILE")"
 touch "$ENV_FILE"
 chmod 0640 "$ENV_FILE"
 chown root:"$SERVICE_GROUP" "$ENV_FILE" 2>/dev/null || true
+BACKUP_FILE=$(mktemp -t weather-to-docx-env-XXXXXX)
+cp -a "$ENV_FILE" "$BACKUP_FILE"
+
+restore_on_error() {
+  local code=$?
+  if [[ $code -ne 0 && $COMMITTED -eq 0 && -f "$BACKUP_FILE" ]]; then
+    cp -a "$BACKUP_FILE" "$ENV_FILE"
+    echo "Предыдущие настройки восстановлены." >&2
+  fi
+  rm -f "$BACKUP_FILE"
+}
+trap restore_on_error EXIT
 
 get_value() {
-  local key=$1 default=${2:-}
-  local value
+  local key=$1 default=${2:-} value
   value=$(sed -n "s/^${key}=//p" "$ENV_FILE" | tail -1)
   value=${value#\"}; value=${value%\"}
   printf '%s' "${value:-$default}"
@@ -61,7 +74,7 @@ path = Path(sys.argv[1])
 key = sys.argv[2]
 value = sys.argv[3]
 line = f"{key}={json.dumps(value, ensure_ascii=False)}\n"
-lines = path.read_text(encoding="utf-8").splitlines(keepends=True) if path.exists() else []
+lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
 result = []
 replaced = False
 for current in lines:
@@ -129,9 +142,9 @@ if [[ $NON_INTERACTIVE -eq 0 ]]; then
 
 Weather to DOCX — первичная настройка
 -------------------------------------
-Enter принимает рекомендуемое значение. Токены не отображаются на экране.
-Для безопасного сетевого доступа оставьте API на 127.0.0.1 и настройте
-Nginx/HAProxy с TLS и аутентификацией.
+Enter принимает рекомендуемое значение. Токены не отображаются.
+Для доступа из сети оставьте API на 127.0.0.1 и настройте Nginx/HAProxy
+с TLS и аутентификацией.
 EOF
 fi
 
@@ -143,16 +156,16 @@ if ! is_loopback_host "$api_host"; then
     cat >&2 <<'EOF'
 
 Внимание: выбран сетевой адрес. Встроенной аутентификации у API нет.
-Рекомендуется вернуть 127.0.0.1 и открыть доступ через reverse proxy.
+Безопасный вариант — 127.0.0.1 и reverse proxy.
 EOF
   fi
   allow_insecure=$(ask_yes_no \
     "Осознанно разрешить незащищённый сетевой API" \
     "$allow_insecure")
   if [[ "$allow_insecure" != true ]]; then
-    echo "Используется безопасный адрес 127.0.0.1." >&2
     api_host=127.0.0.1
     allow_insecure=false
+    echo "Используется безопасный адрес 127.0.0.1." >&2
   fi
 else
   allow_insecure=false
@@ -206,11 +219,10 @@ if [[ $telegram_enabled == true ]]; then
   telegram_token=$(ask_secret "Telegram bot token от @BotFather" "$telegram_token")
   allowed_users=$(ask "Разрешённые Telegram user ID через запятую (пусто — доступ всем)" "$allowed_users")
   if [[ -z "$telegram_token" ]]; then
-    echo "Предупреждение: Telegram включён, но токен пуст. Служба не будет запущена." >&2
+    echo "Telegram включён, но token пуст. Служба останется выключенной." >&2
     telegram_enabled=false
-  fi
-  if [[ -z "$allowed_users" ]]; then
-    echo "Предупреждение: список пользователей пуст — бот будет доступен всем, кто знает его имя." >&2
+  elif [[ -z "$allowed_users" ]]; then
+    echo "Предупреждение: бот будет доступен всем, кто знает его имя." >&2
   fi
 fi
 
@@ -237,15 +249,24 @@ set_value WTD_LOG_LEVEL "$(get_value WTD_LOG_LEVEL INFO)"
 chmod 0640 "$ENV_FILE"
 chown root:"$SERVICE_GROUP" "$ENV_FILE" 2>/dev/null || true
 
-# Проверяем всю конфигурацию тем же Pydantic-классом, который используют службы.
-if ! env $(grep -E '^WTD_[A-Z0-9_]+=' "$ENV_FILE" | xargs) \
-  "$PYTHON_BIN" -c 'from weather_to_docx.settings import Settings; Settings()' 2>/tmp/weather-to-docx-configure-error; then
-  echo "Ошибка проверки настроек:" >&2
-  cat /tmp/weather-to-docx-configure-error >&2
-  rm -f /tmp/weather-to-docx-configure-error
+if ! "$PYTHON_BIN" - "$ENV_FILE" <<'PY'
+import sys
+from weather_to_docx.settings import Settings
+from weather_to_docx.sources.registry import SourceRegistry
+
+settings = Settings(_env_file=sys.argv[1])
+settings.allowed_telegram_users
+available = {item.source_id for item in SourceRegistry(settings).descriptors()}
+unknown = sorted(set(settings.default_sources) - available)
+if unknown:
+    raise SystemExit("Неизвестные source_id: " + ", ".join(unknown))
+PY
+then
+  echo "Ошибка проверки настроек. Изменения не применены." >&2
   exit 3
 fi
-rm -f /tmp/weather-to-docx-configure-error
+
+COMMITTED=1
 
 cat <<EOF
 
@@ -259,6 +280,4 @@ cat <<EOF
 
 Редактирование:
   sudoedit $ENV_FILE
-
-После изменения токенов перезапустите соответствующую службу.
 EOF
