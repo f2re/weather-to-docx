@@ -22,11 +22,33 @@ class Settings(BaseSettings):
     incoming_dir: Path | None = None
     icon_cache_dir: Path | None = None
 
+    api_host: str = "127.0.0.1"
+    api_port: int = Field(default=8080, ge=1, le=65535)
+    default_timezone: str = "Europe/Moscow"
+    default_forecast_days: int = Field(default=7, ge=1, le=35)
+    default_source_ids: str = (
+        "open_meteo_gfs,open_meteo_ecmwf_ifs,open_meteo_dwd_icon_global,"
+        "open_meteo_gefs_0p25"
+    )
+
     http_timeout_seconds: float = Field(default=60, gt=0, le=600)
     http_max_retries: int = Field(default=3, ge=1, le=10)
     http_user_agent: str = (
-        "weather-to-docx/0.2.0 (+https://github.com/f2re/weather-to-docx)"
+        "weather-to-docx/0.3.0 (+https://github.com/f2re/weather-to-docx)"
     )
+
+    dadata_token: str | None = None
+    dadata_secret: str | None = None
+    dadata_timeout_seconds: float = Field(default=20, gt=0, le=120)
+    dadata_suggestion_count: int = Field(default=5, ge=1, le=20)
+
+    telegram_enabled: bool = False
+    telegram_bot_token: str | None = None
+    telegram_allowed_user_ids: str = ""
+    telegram_max_locations: int = Field(default=100, ge=1, le=1000)
+    telegram_max_input_bytes: int = Field(default=20 * 1024 * 1024, ge=1024)
+    telegram_max_output_bytes: int = Field(default=50 * 1024 * 1024, ge=1024)
+    telegram_concurrency: int = Field(default=2, ge=1, le=20)
 
     require_bundle_signature: bool = False
     bundle_public_key: Path | None = None
@@ -41,6 +63,11 @@ class Settings(BaseSettings):
                 "Допустимые уровни журнала: DEBUG, INFO, WARNING, ERROR, CRITICAL"
             )
         return value
+
+    @field_validator("default_source_ids", "telegram_allowed_user_ids")
+    @classmethod
+    def normalize_comma_lists(cls, value: str) -> str:
+        return ",".join(item.strip() for item in value.split(",") if item.strip())
 
     @model_validator(mode="after")
     def resolve_paths(self) -> Settings:
@@ -72,7 +99,33 @@ class Settings(BaseSettings):
         )
         if self.bundle_public_key:
             self.bundle_public_key = self.bundle_public_key.expanduser().resolve()
+        if self.telegram_enabled and not self.telegram_bot_token:
+            raise ValueError(
+                "WTD_TELEGRAM_ENABLED=true требует WTD_TELEGRAM_BOT_TOKEN"
+            )
         return self
+
+    @property
+    def default_sources(self) -> tuple[str, ...]:
+        return tuple(item for item in self.default_source_ids.split(",") if item)
+
+    @property
+    def allowed_telegram_users(self) -> frozenset[int]:
+        users: set[int] = set()
+        for raw in self.telegram_allowed_user_ids.split(","):
+            if not raw:
+                continue
+            try:
+                users.add(int(raw))
+            except ValueError as exc:
+                raise ValueError(
+                    "WTD_TELEGRAM_ALLOWED_USER_IDS должен содержать целые ID через запятую"
+                ) from exc
+        return frozenset(users)
+
+    @property
+    def dadata_configured(self) -> bool:
+        return bool(self.dadata_token)
 
     def ensure_directories(self) -> None:
         for path in (

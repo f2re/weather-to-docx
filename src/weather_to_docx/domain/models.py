@@ -19,6 +19,14 @@ class QualityFlag(StrEnum):
     SUSPECT = "suspect"
 
 
+class SourceKind(StrEnum):
+    """Физический смысл прогностического ряда."""
+
+    DETERMINISTIC = "deterministic"
+    ENSEMBLE = "ensemble"
+    SYNTHETIC = "synthetic"
+
+
 class JobStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -69,6 +77,7 @@ class SourceMetadata(BaseModel):
     provider: str
     model: str
     product: str
+    source_kind: SourceKind = SourceKind.DETERMINISTIC
     cycle_time_utc: datetime | None = None
     retrieved_at_utc: datetime
     horizon_hours: int | None = None
@@ -82,8 +91,16 @@ class SourceMetadata(BaseModel):
     licence: str | None = None
     source_reference: str | None = None
     attribution: str | None = None
-    adapter_version: str = "0.2.0"
+    adapter_version: str = "0.3.0"
     exact_cycle_known: bool = True
+
+    ensemble_member_count: int | None = Field(default=None, ge=1)
+    ensemble_expected_member_count: int | None = Field(default=None, ge=1)
+    ensemble_member_coverage_percent: float | None = Field(default=None, ge=0, le=100)
+    member_weighting: str | None = None
+    primary_statistic_policy: str | None = None
+    quantile_method: str | None = None
+    probability_calibration: str | None = None
 
     @field_validator("cycle_time_utc", "retrieved_at_utc")
     @classmethod
@@ -91,6 +108,27 @@ class SourceMetadata(BaseModel):
         if value is not None and value.tzinfo is None:
             raise ValueError("Дата и время должны содержать часовой пояс")
         return value
+
+    @model_validator(mode="after")
+    def validate_ensemble_metadata(self) -> SourceMetadata:
+        ensemble_fields = (
+            self.ensemble_member_count,
+            self.ensemble_expected_member_count,
+            self.ensemble_member_coverage_percent,
+        )
+        has_ensemble_metadata = any(value is not None for value in ensemble_fields)
+        if (
+            has_ensemble_metadata
+            and self.source_kind == SourceKind.DETERMINISTIC
+            and _looks_like_legacy_ensemble(self.source_id, self.model, self.product)
+        ):
+            # Пакеты 0.2.x не содержали source_kind, но уже могли содержать N.
+            self.source_kind = SourceKind.ENSEMBLE
+        elif has_ensemble_metadata and self.source_kind != SourceKind.ENSEMBLE:
+            raise ValueError(
+                "Число членов и полнота допустимы только для ансамблевого источника"
+            )
+        return self
 
 
 class ForecastPoint(BaseModel):
@@ -152,8 +190,12 @@ class DocumentOptions(BaseModel):
     summary_interval_hours: int = Field(default=3, ge=1, le=24)
     extended_summary_interval_hours: int = Field(default=6, ge=1, le=24)
     summary_switch_hour: int = Field(default=120, ge=1, le=1000)
+    ensemble_interval_hours: int = Field(default=6, ge=1, le=24)
+    ensemble_extended_interval_hours: int = Field(default=12, ge=1, le=24)
+    ensemble_switch_hour: int = Field(default=120, ge=1, le=1000)
     include_detailed_table: bool = True
     include_all_parameters: bool = True
+    include_ensemble_section: bool = True
     parameter_profile: str = Field(
         default="all",
         pattern=r"^(operational|extended|all)$",
@@ -177,6 +219,9 @@ class BatchRequest(BaseModel):
         ids = [location.id for location in self.locations]
         if len(ids) != len(set(ids)):
             raise ValueError("Идентификаторы координат должны быть уникальными")
+        source_ids = [source.source_id for source in self.sources]
+        if len(source_ids) != len(set(source_ids)):
+            raise ValueError("Один источник нельзя добавлять в задание дважды")
         return self
 
 
@@ -211,3 +256,8 @@ class JobRecord(BaseModel):
     error: str | None = None
     created_at_utc: datetime
     updated_at_utc: datetime
+
+
+def _looks_like_legacy_ensemble(source_id: str, model: str, product: str) -> bool:
+    text = f"{source_id} {model} {product}".lower()
+    return any(token in text for token in ("ensemble", "gefs", "geps", "eps", "ансамб"))

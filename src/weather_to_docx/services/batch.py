@@ -9,7 +9,7 @@ from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
 
-from weather_to_docx.document.generator import DocumentGenerator
+from weather_to_docx.document.scientific_generator import ScientificDocumentGenerator
 from weather_to_docx.domain.models import (
     BatchArtifact,
     BatchRequest,
@@ -30,19 +30,25 @@ class ForecastBatchService:
     def __init__(self, settings: Settings, registry: SourceRegistry | None = None) -> None:
         self.settings = settings
         self.registry = registry or SourceRegistry(settings)
-        self.generator = DocumentGenerator(settings.icon_cache_dir)
+        self.generator = ScientificDocumentGenerator(settings.icon_cache_dir)
 
     async def collect(self, request: BatchRequest) -> list[CollectedLocation]:
-        collected = {location.id: CollectedLocation(location=location) for location in request.locations}
-        order: dict[tuple[str, str], int] = {
+        collected = {
+            location.id: CollectedLocation(location=location)
+            for location in request.locations
+        }
+        pairs = [
+            (location, source)
+            for location in request.locations
+            for source in request.sources
+        ]
+        order = {
             (location.id, source.source_id): index
-            for index, (location, source) in enumerate(
-                pair for location in request.locations for pair in ((location, source) for source in request.sources)
-            )
+            for index, (location, source) in enumerate(pairs)
         }
         semaphore = asyncio.Semaphore(6)
 
-        async def fetch_one(location: Location, source_request) -> tuple[str, str, ForecastSeries | None, str | None]:
+        async def fetch_one(location: Location, source_request):
             async with semaphore:
                 try:
                     source = self.registry.get(source_request.source_id)
@@ -53,17 +59,20 @@ class ForecastBatchService:
                     )
                     return location.id, source_request.source_id, forecast, None
                 except Exception as exc:
-                    LOGGER.exception("Forecast source %s failed for %s", source_request.source_id, location.id)
+                    LOGGER.exception(
+                        "Forecast source %s failed for %s",
+                        source_request.source_id,
+                        location.id,
+                    )
                     return location.id, source_request.source_id, None, str(exc)
 
-        tasks = [
-            fetch_one(location, source_request)
-            for location in request.locations
-            for source_request in request.sources
-        ]
-        results = await asyncio.gather(*tasks)
-        sorted_results = sorted(results, key=lambda item: order[(item[0], item[1])])
-        for location_id, source_id, forecast, error in sorted_results:
+        results = await asyncio.gather(
+            *(fetch_one(location, source) for location, source in pairs)
+        )
+        for location_id, source_id, forecast, error in sorted(
+            results,
+            key=lambda item: order[(item[0], item[1])],
+        ):
             item = collected[location_id]
             if forecast is not None:
                 item.series.append(forecast)
@@ -104,7 +113,11 @@ class ForecastBatchService:
             CollectedLocation(
                 location=location,
                 series=grouped.get(location.id, []),
-                errors=[] if grouped.get(location.id) else ["В пакете нет прогнозов для координаты"],
+                errors=(
+                    []
+                    if grouped.get(location.id)
+                    else ["В пакете нет прогнозов для координаты"]
+                ),
             )
             for location in locations
         ]
@@ -140,15 +153,17 @@ class ForecastBatchService:
         batch_dir.mkdir(parents=True, exist_ok=True)
         result = BatchResult(batch_id=batch_id, status=JobStatus.RUNNING)
         generated_documents: list[Path] = []
+        document_manifest: list[dict] = []
         source_manifest: list[dict] = []
 
         for item in collected:
             if item.errors:
-                result.errors.extend(f"{item.location.name}: {error}" for error in item.errors)
+                result.errors.extend(
+                    f"{item.location.name}: {error}" for error in item.errors
+                )
             if not item.series:
                 continue
-            document_name = self._document_name(item.location)
-            path = batch_dir / document_name
+            path = batch_dir / self._document_name(item.location)
             try:
                 self.generator.generate(
                     location=item.location,
@@ -157,7 +172,17 @@ class ForecastBatchService:
                     output_path=path,
                 )
                 generated_documents.append(path)
-                result.artifacts.append(self._artifact(path, "docx", item.location.id))
+                artifact = self._artifact(path, "docx", item.location.id)
+                result.artifacts.append(artifact)
+                document_manifest.append(
+                    {
+                        "kind": "docx",
+                        "location_id": item.location.id,
+                        "name": path.name,
+                        "sha256": artifact.sha256,
+                        "size_bytes": artifact.size_bytes,
+                    }
+                )
                 for forecast in item.series:
                     source_manifest.append(
                         {
@@ -173,7 +198,9 @@ class ForecastBatchService:
                     )
             except Exception as exc:
                 LOGGER.exception("DOCX generation failed for %s", item.location.id)
-                result.errors.append(f"{item.location.name}: документ не сформирован: {exc}")
+                result.errors.append(
+                    f"{item.location.name}: документ не сформирован: {exc}"
+                )
 
         if not generated_documents:
             result.status = JobStatus.FAILED
@@ -183,31 +210,51 @@ class ForecastBatchService:
             result.status = JobStatus.COMPLETED
 
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "batch_id": batch_id,
             "batch_name": request.batch_name,
             "created_at_utc": datetime.now(UTC).isoformat(),
             "status": result.status.value,
+            "document_composition": (
+                "deterministic model sections followed by one scientific ensemble section"
+            ),
+            # Поля locations и artifacts сохраняются для совместимости с
+            # пакетами и клиентами версии 0.2.x.
+            "locations": [
+                location.model_dump(mode="json")
+                for location in request.locations
+            ],
+            "artifacts": document_manifest,
             "request": request.model_dump(mode="json"),
             "sources": source_manifest,
             "documents": [
                 {
-                    "name": path.name,
-                    "sha256": sha256_file(path),
-                    "size_bytes": path.stat().st_size,
+                    "name": item["name"],
+                    "sha256": item["sha256"],
+                    "size_bytes": item["size_bytes"],
                 }
-                for path in generated_documents
+                for item in document_manifest
             ],
             "warnings": result.warnings,
             "errors": result.errors,
         }
         manifest_path = batch_dir / "manifest.json"
-        manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        manifest_path.write_text(
+            json.dumps(manifest, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
         result.artifacts.append(self._artifact(manifest_path, "manifest", None))
 
-        archive_name = safe_filename(request.batch_name or f"forecast_batch_{batch_id}") + ".zip"
+        archive_name = (
+            safe_filename(request.batch_name or f"forecast_batch_{batch_id}") + ".zip"
+        )
         archive_path = batch_dir / archive_name
-        with zipfile.ZipFile(archive_path, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+        with zipfile.ZipFile(
+            archive_path,
+            "w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=6,
+        ) as archive:
             for path in generated_documents:
                 archive.write(path, arcname=path.name)
             archive.write(manifest_path, arcname=manifest_path.name)
@@ -221,7 +268,11 @@ class ForecastBatchService:
         return f"{safe_filename(base)}_{date_text}.docx"
 
     @staticmethod
-    def _artifact(path: Path, kind: str, location_id: str | None) -> BatchArtifact:
+    def _artifact(
+        path: Path,
+        kind: str,
+        location_id: str | None,
+    ) -> BatchArtifact:
         return BatchArtifact(
             kind=kind,
             path=path.resolve(),

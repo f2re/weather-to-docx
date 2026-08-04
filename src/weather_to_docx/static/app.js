@@ -7,73 +7,60 @@ const state = {
   jobs: [],
   selectedLocations: new Set(),
   selectedSources: new Set(),
-  sourceDays: new Map(),
+  suggestions: [],
   toastTimer: null,
 };
 
-const recommendedSourceIds = new Set([
-  "open_meteo_gfs",
-  "open_meteo_ecmwf_ifs",
-  "open_meteo_dwd_icon_global",
-  "open_meteo_gefs_0p25",
-]);
-
-const statusLabels = {
+const statusNames = {
   queued: "В очереди",
   running: "Выполняется",
-  completed: "Завершено",
-  partial: "Частично завершено",
+  completed: "Готово",
+  partial: "Готово с предупреждениями",
   failed: "Ошибка",
   cancelled: "Отменено",
 };
 
-const statusClasses = {
-  queued: "status-neutral",
-  running: "status-warning",
-  completed: "status-success",
-  partial: "status-warning",
-  failed: "status-danger",
-  cancelled: "status-neutral",
-};
-
-document.addEventListener("DOMContentLoaded", () => {
+window.addEventListener("DOMContentLoaded", () => {
   bindEvents();
-  restorePreferences();
   refreshAll();
   window.setInterval(() => {
-    if (!document.hidden) {
-      loadJobs().catch(reportError);
-    }
+    if (!document.hidden) loadJobs().catch(reportError);
   }, 5000);
 });
 
 function bindEvents() {
-  document.querySelector("#refreshAll").addEventListener("click", refreshAll);
-  document.querySelector("#refreshJobs").addEventListener("click", () => loadJobs().catch(reportError));
-  document.querySelector("#locationForm").addEventListener("submit", saveLocation);
-  document.querySelector("#cancelLocationEdit").addEventListener("click", resetLocationForm);
-  document.querySelector("#locationName").addEventListener("blur", suggestLocationId);
-  document.querySelector("#locationsBody").addEventListener("click", handleLocationAction);
-  document.querySelector("#locationsBody").addEventListener("change", handleLocationSelection);
-  document.querySelector("#selectAllLocations").addEventListener("click", toggleAllLocations);
-  document.querySelector("#exportLocations").addEventListener("click", exportLocations);
-  document.querySelector("#importLocationsFile").addEventListener("change", importLocations);
-  document.querySelector("#sourcesList").addEventListener("change", handleSourceChange);
-  document.querySelector("#recommendedSources").addEventListener("click", selectRecommendedSources);
-  document.querySelector("#clearSources").addEventListener("click", clearSources);
-  document.querySelector("#createJob").addEventListener("click", createJob);
-  document.querySelector("#jobsList").addEventListener("click", handleJobAction);
-
-  for (const element of document.querySelectorAll("#generationForm input, #generationForm select")) {
-    element.addEventListener("change", () => {
-      savePreferences();
-      updateSelectionSummary();
-    });
-  }
+  byId("refreshAll").addEventListener("click", refreshAll);
+  byId("refreshJobs").addEventListener("click", () => loadJobs().catch(reportError));
+  byId("findCity").addEventListener("click", findCity);
+  byId("cityQuery").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      findCity();
+    }
+  });
+  byId("citySuggestions").addEventListener("click", chooseSuggestion);
+  byId("locationForm").addEventListener("submit", addCoordinates);
+  byId("locationsBody").addEventListener("change", selectLocation);
+  byId("locationsBody").addEventListener("click", deleteLocation);
+  byId("selectAllLocations").addEventListener("click", () => {
+    state.selectedLocations = new Set(state.locations.map((item) => item.id));
+    renderLocations();
+  });
+  byId("clearLocationSelection").addEventListener("click", () => {
+    state.selectedLocations.clear();
+    renderLocations();
+  });
+  byId("exportLocations").addEventListener("click", exportLocations);
+  byId("locationFile").addEventListener("change", importFile);
+  byId("deterministicSources").addEventListener("change", selectSource);
+  byId("ensembleSources").addEventListener("change", selectSource);
+  byId("recommendedSources").addEventListener("click", selectRecommendedSources);
+  byId("createJob").addEventListener("click", createJob);
+  byId("jobsList").addEventListener("click", jobAction);
 }
 
 async function refreshAll() {
-  setHealth("Проверка системы…", "status-neutral");
+  setHealth("Проверка…", "");
   try {
     await Promise.all([
       loadDiagnostics(),
@@ -81,32 +68,29 @@ async function refreshAll() {
       loadSources(),
       loadJobs(),
     ]);
-    setHealth("Система доступна", "status-success");
+    setHealth("Система готова", "ok");
   } catch (error) {
-    setHealth("Есть проблема", "status-danger");
+    setHealth("Есть проблема", "error");
     reportError(error);
   }
 }
 
 async function api(path, options = {}) {
-  const request = {
+  const response = await fetch(path, {
+    ...options,
     headers: {
       Accept: "application/json",
       ...(options.body ? {"Content-Type": "application/json"} : {}),
       ...(options.headers || {}),
     },
-    ...options,
-  };
-  const response = await fetch(path, request);
-  if (response.status === 204) {
-    return null;
-  }
-  const contentType = response.headers.get("content-type") || "";
-  const body = contentType.includes("application/json")
+  });
+  if (response.status === 204) return null;
+  const type = response.headers.get("content-type") || "";
+  const body = type.includes("json")
     ? await response.json()
     : await response.text();
   if (!response.ok) {
-    const detail = typeof body === "object" && body !== null
+    const detail = typeof body === "object"
       ? body.detail || JSON.stringify(body)
       : body;
     throw new Error(detail || `HTTP ${response.status}`);
@@ -116,275 +100,218 @@ async function api(path, options = {}) {
 
 async function loadDiagnostics() {
   state.diagnostics = await api("/api/v1/diagnostics");
-  renderDiagnostics();
-}
-
-function renderDiagnostics() {
-  const data = state.diagnostics;
-  const cards = [
-    {
-      label: "Версия",
-      value: data.version,
-      note: data.eccodes_python ? "ecCodes доступен" : "Прямой GRIB требует ecCodes",
-    },
-    {
-      label: "Источники",
-      value: String(data.source_count),
-      note: "Детерминированные модели и ансамбли",
-    },
-    {
-      label: "Координаты",
-      value: String(data.location_count),
-      note: "Сохранено в SQLite",
-    },
-    {
-      label: "Хранилище документов",
-      value: data.documents_writable ? "Доступно" : "Нет записи",
-      note: data.documents_dir,
-    },
+  const d = state.diagnostics;
+  byId("dadataHint").textContent = d.dadata_configured
+    ? "DaData подключена: доступны города и адреса."
+    : "DaData не настроена: вводите координаты или добавьте WTD_DADATA_TOKEN.";
+  const rows = [
+    ["Версия", d.version],
+    ["Модели", `${d.deterministic_source_count} дет. / ${d.ensemble_source_count} ансамбл.`],
+    ["DaData", d.dadata_configured ? "подключена" : "не настроена"],
+    ["Telegram", d.telegram_enabled ? "включён" : "выключен"],
+    ["ecCodes", d.eccodes_python ? "доступен" : "не установлен"],
   ];
-  document.querySelector("#diagnostics").innerHTML = cards
-    .map((card) => `
-      <article class="metric-card">
-        <span>${escapeHtml(card.label)}</span>
-        <strong>${escapeHtml(card.value)}</strong>
-        <small>${escapeHtml(card.note)}</small>
-      </article>
-    `)
+  byId("diagnostics").innerHTML = rows
+    .map(([label, value]) => `<div class="metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`)
     .join("");
+  byId("forecastDays").value ||= d.default_forecast_days || 7;
 }
 
 async function loadLocations() {
   state.locations = await api("/api/v1/locations?limit=10000");
-  const available = new Set(state.locations.map((location) => location.id));
+  const ids = new Set(state.locations.map((item) => item.id));
   state.selectedLocations = new Set(
-    [...state.selectedLocations].filter((id) => available.has(id)),
+    [...state.selectedLocations].filter((id) => ids.has(id)),
   );
   renderLocations();
-  updateSelectionSummary();
 }
 
 function renderLocations() {
-  const body = document.querySelector("#locationsBody");
+  const body = byId("locationsBody");
   if (!state.locations.length) {
-    body.innerHTML = `
+    body.innerHTML = '<tr><td colspan="5" class="empty">Добавьте город, координаты или файл.</td></tr>';
+  } else {
+    body.innerHTML = state.locations.map((location) => `
       <tr>
-        <td colspan="6" class="empty-state">
-          Справочник пуст. Добавьте первую точку или импортируйте JSON.
-        </td>
-      </tr>
-    `;
-    return;
+        <td><input type="checkbox" data-location="${escapeAttribute(location.id)}" ${state.selectedLocations.has(location.id) ? "checked" : ""}></td>
+        <td><span class="location-title">${escapeHtml(location.name)}</span><span class="location-id">${escapeHtml(location.id)}</span></td>
+        <td>${format(location.latitude, 5)}, ${format(location.longitude, 5)}</td>
+        <td>${escapeHtml(location.group || "—")}</td>
+        <td><button class="button ghost" type="button" data-delete="${escapeAttribute(location.id)}">Удалить</button></td>
+      </tr>`).join("");
   }
-
-  body.innerHTML = state.locations
-    .map((location) => {
-      const selected = state.selectedLocations.has(location.id);
-      const elevation = location.elevation_m == null ? "" : ` · ${formatNumber(location.elevation_m, 0)} м`;
-      return `
-        <tr>
-          <td>
-            <input
-              class="row-selector"
-              type="checkbox"
-              data-location-select="${escapeAttribute(location.id)}"
-              ${selected ? "checked" : ""}
-              aria-label="Выбрать ${escapeAttribute(location.name)}"
-            >
-          </td>
-          <td>
-            <span class="location-name">${escapeHtml(location.name)}</span>
-            <span class="location-id">${escapeHtml(location.id)}</span>
-          </td>
-          <td>
-            ${formatNumber(location.latitude, 5)}, ${formatNumber(location.longitude, 5)}${escapeHtml(elevation)}
-          </td>
-          <td>${escapeHtml(location.timezone)}</td>
-          <td>${escapeHtml(location.group || "—")}</td>
-          <td class="actions-column">
-            <button class="button button-ghost button-small" type="button" data-edit-location="${escapeAttribute(location.id)}">Изменить</button>
-            <button class="button button-danger button-small" type="button" data-delete-location="${escapeAttribute(location.id)}">Удалить</button>
-          </td>
-        </tr>
-      `;
-    })
-    .join("");
+  byId("locationCount").textContent = `${state.selectedLocations.size} выбрано`;
+  updateSummary();
 }
 
-async function saveLocation(event) {
-  event.preventDefault();
-  const editingId = value("#editingLocationId");
-  const elevationText = value("#locationElevation");
-  const location = {
-    id: value("#locationId"),
-    name: value("#locationName"),
-    latitude: Number(value("#locationLatitude")),
-    longitude: Number(value("#locationLongitude")),
-    elevation_m: elevationText === "" ? null : Number(elevationText),
-    timezone: value("#locationTimezone"),
-    group: nullableValue("#locationGroup"),
-    output_name: null,
-  };
-
-  const button = document.querySelector("#saveLocation");
-  setBusy(button, true, "Сохранение…");
+async function findCity() {
+  const query = byId("cityQuery").value.trim();
+  if (query.length < 2) {
+    return reportError(new Error("Введите минимум два символа."));
+  }
+  const button = byId("findCity");
+  busy(button, true, "Поиск…");
   try {
-    if (editingId) {
-      await api(`/api/v1/locations/${encodeURIComponent(editingId)}`, {
-        method: "PUT",
-        body: JSON.stringify(location),
-      });
-    } else {
-      await api("/api/v1/locations", {
-        method: "POST",
-        body: JSON.stringify(location),
-      });
-    }
-    state.selectedLocations.add(location.id);
-    resetLocationForm();
-    await Promise.all([loadLocations(), loadDiagnostics()]);
-    showToast("Координата сохранена.");
+    state.suggestions = await api("/api/v1/geocoding/suggest", {
+      method: "POST",
+      body: JSON.stringify({query, count: 5}),
+    });
+    renderSuggestions();
   } catch (error) {
     reportError(error);
   } finally {
-    setBusy(button, false, "Сохранить точку");
+    busy(button, false, "Найти");
   }
 }
 
-function suggestLocationId() {
-  const editingId = value("#editingLocationId");
-  const idInput = document.querySelector("#locationId");
-  if (editingId || idInput.value.trim()) {
-    return;
-  }
-  const suggested = value("#locationName")
-    .trim()
-    .toLocaleLowerCase("ru")
-    .replace(/ё/g, "е")
-    .replace(/[^a-zа-я0-9._-]+/gi, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 120);
-  idInput.value = suggested;
+function renderSuggestions() {
+  byId("citySuggestions").innerHTML = state.suggestions.length
+    ? state.suggestions.map((item, index) => `
+      <button class="suggestion" type="button" data-suggestion="${index}">
+        <strong>${escapeHtml(item.name)}</strong>
+        <small>${escapeHtml(item.address)} · ${format(item.latitude, 5)}, ${format(item.longitude, 5)}</small>
+      </button>`).join("")
+    : '<span class="muted">Совпадений не найдено.</span>';
 }
 
-function handleLocationAction(event) {
-  const editButton = event.target.closest("[data-edit-location]");
-  if (editButton) {
-    const location = state.locations.find(
-      (item) => item.id === editButton.dataset.editLocation,
-    );
-    if (location) {
-      fillLocationForm(location);
-    }
-    return;
-  }
-
-  const deleteButton = event.target.closest("[data-delete-location]");
-  if (deleteButton) {
-    deleteLocation(deleteButton.dataset.deleteLocation);
-  }
-}
-
-function handleLocationSelection(event) {
-  const selector = event.target.closest("[data-location-select]");
-  if (!selector) {
-    return;
-  }
-  if (selector.checked) {
-    state.selectedLocations.add(selector.dataset.locationSelect);
-  } else {
-    state.selectedLocations.delete(selector.dataset.locationSelect);
-  }
-  updateSelectionSummary();
-}
-
-function fillLocationForm(location) {
-  setValue("#editingLocationId", location.id);
-  setValue("#locationId", location.id);
-  setValue("#locationName", location.name);
-  setValue("#locationLatitude", location.latitude);
-  setValue("#locationLongitude", location.longitude);
-  setValue("#locationElevation", location.elevation_m ?? "");
-  setValue("#locationTimezone", location.timezone);
-  setValue("#locationGroup", location.group ?? "");
-  document.querySelector("#locationId").readOnly = true;
-  document.querySelector("#saveLocation").textContent = "Сохранить изменения";
-  document.querySelector("#cancelLocationEdit").classList.remove("hidden");
-  document.querySelector("#locationName").focus();
-}
-
-function resetLocationForm() {
-  document.querySelector("#locationForm").reset();
-  setValue("#editingLocationId", "");
-  setValue("#locationTimezone", "Europe/Moscow");
-  document.querySelector("#locationId").readOnly = false;
-  document.querySelector("#saveLocation").textContent = "Сохранить точку";
-  document.querySelector("#cancelLocationEdit").classList.add("hidden");
-}
-
-async function deleteLocation(locationId) {
-  const location = state.locations.find((item) => item.id === locationId);
-  if (!window.confirm(`Удалить точку «${location?.name || locationId}»?`)) {
-    return;
-  }
+async function chooseSuggestion(event) {
+  const button = event.target.closest("[data-suggestion]");
+  if (!button) return;
+  const candidate = state.suggestions[Number(button.dataset.suggestion)];
+  if (!candidate) return;
   try {
-    await api(`/api/v1/locations/${encodeURIComponent(locationId)}`, {
-      method: "DELETE",
-    });
-    state.selectedLocations.delete(locationId);
-    await Promise.all([loadLocations(), loadDiagnostics()]);
-    showToast("Координата удалена.");
+    const location = await saveLocation(candidate.location);
+    state.selectedLocations.add(location.id);
+    byId("cityQuery").value = "";
+    state.suggestions = [];
+    renderSuggestions();
+    await loadLocations();
+    toast(`Добавлена точка «${location.name}».`);
   } catch (error) {
     reportError(error);
   }
 }
 
-function toggleAllLocations() {
-  const allSelected = state.locations.length > 0
-    && state.locations.every((location) => state.selectedLocations.has(location.id));
-  state.selectedLocations = allSelected
-    ? new Set()
-    : new Set(state.locations.map((location) => location.id));
+async function addCoordinates(event) {
+  event.preventDefault();
+  const lat = Number(byId("locationLatitude").value);
+  const lon = Number(byId("locationLongitude").value);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return reportError(new Error("Укажите широту и долготу."));
+  }
+  const name = byId("locationName").value.trim()
+    || `Координаты ${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  const location = {
+    id: `manual-${Date.now()}`,
+    name,
+    latitude: lat,
+    longitude: lon,
+    elevation_m: null,
+    timezone: "Europe/Moscow",
+    group: "Вручную",
+    output_name: null,
+  };
+  try {
+    const saved = await saveLocation(location);
+    state.selectedLocations.add(saved.id);
+    event.target.reset();
+    await loadLocations();
+  } catch (error) {
+    reportError(error);
+  }
+}
+
+async function saveLocation(location) {
+  return api("/api/v1/locations", {
+    method: "POST",
+    body: JSON.stringify(location),
+  });
+}
+
+function selectLocation(event) {
+  const checkbox = event.target.closest("[data-location]");
+  if (!checkbox) return;
+  if (checkbox.checked) state.selectedLocations.add(checkbox.dataset.location);
+  else state.selectedLocations.delete(checkbox.dataset.location);
   renderLocations();
-  updateSelectionSummary();
+}
+
+async function deleteLocation(event) {
+  const button = event.target.closest("[data-delete]");
+  if (!button || !window.confirm("Удалить точку из справочника?")) return;
+  try {
+    await api(`/api/v1/locations/${encodeURIComponent(button.dataset.delete)}`, {
+      method: "DELETE",
+    });
+    state.selectedLocations.delete(button.dataset.delete);
+    await loadLocations();
+  } catch (error) {
+    reportError(error);
+  }
 }
 
 function exportLocations() {
-  const payload = {
-    schema: "weather-to-docx/locations-v1",
-    exported_at: new Date().toISOString(),
-    locations: state.locations,
-  };
-  downloadBlob(
-    `weather-to-docx-locations-${new Date().toISOString().slice(0, 10)}.json`,
-    JSON.stringify(payload, null, 2),
+  download(
+    "weather-to-docx-locations.json",
+    JSON.stringify({locations: state.locations}, null, 2),
     "application/json",
   );
 }
 
-async function importLocations(event) {
+async function importFile(event) {
   const file = event.target.files?.[0];
-  if (!file) {
-    return;
-  }
+  if (!file) return;
+  toast(`Импорт ${file.name}`);
   try {
-    const parsed = JSON.parse(await file.text());
-    const locations = Array.isArray(parsed) ? parsed : parsed.locations;
-    if (!Array.isArray(locations) || !locations.length) {
-      throw new Error("Файл не содержит непустой массив locations.");
+    const text = await file.text();
+    let items = [];
+    if (file.name.toLowerCase().endsWith(".json")) {
+      const parsed = JSON.parse(text);
+      items = Array.isArray(parsed) ? parsed : parsed.locations || [];
+    } else if (file.name.toLowerCase().endsWith(".csv")) {
+      items = parseCsv(text);
+    } else {
+      items = text.split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith("#"));
+    }
+    const locations = [];
+    for (const [index, item] of items.slice(0, 1000).entries()) {
+      if (typeof item === "object" && item.latitude != null && item.longitude != null) {
+        locations.push(normalizeImportedLocation(item, index));
+        continue;
+      }
+      const textItem = typeof item === "string"
+        ? item
+        : item.address || item.city || item.name || "";
+      const coords = parseCoordinates(textItem);
+      if (coords) {
+        locations.push(normalizeImportedLocation({
+          name: textItem,
+          latitude: coords[0],
+          longitude: coords[1],
+        }, index));
+      } else if (textItem) {
+        const candidate = await api("/api/v1/geocoding/resolve", {
+          method: "POST",
+          body: JSON.stringify({query: textItem, automatic: true}),
+        });
+        locations.push({
+          ...candidate.location,
+          id: `import-${Date.now()}-${index}`,
+        });
+      }
+    }
+    if (!locations.length) {
+      throw new Error("Файл не содержит распознаваемых точек.");
     }
     const imported = await api("/api/v1/locations/import", {
       method: "POST",
-      body: JSON.stringify({
-        locations,
-        replace_existing: document.querySelector("#replaceLocations").checked,
-      }),
+      body: JSON.stringify({locations, replace_existing: false}),
     });
-    for (const location of imported) {
-      state.selectedLocations.add(location.id);
-    }
-    await Promise.all([loadLocations(), loadDiagnostics()]);
-    showToast(`Импортировано точек: ${imported.length}.`);
+    imported.forEach((item) => state.selectedLocations.add(item.id));
+    await loadLocations();
+    toast(`Импортировано точек: ${imported.length}.`);
   } catch (error) {
     reportError(error);
   } finally {
@@ -392,446 +319,294 @@ async function importLocations(event) {
   }
 }
 
+function parseCsv(text) {
+  const lines = text.replace(/^sep=.\r?\n/i, "").split(/\r?\n/).filter(Boolean);
+  if (!lines.length) return [];
+  const delimiter = lines[0].includes(";")
+    ? ";"
+    : lines[0].includes("\t") ? "\t" : ",";
+  const headers = lines[0].split(delimiter)
+    .map((item) => item.trim().toLowerCase());
+  return lines.slice(1).map((line) => {
+    const values = line.split(delimiter).map((item) => item.trim());
+    const row = Object.fromEntries(
+      headers.map((key, index) => [key, values[index] || ""]),
+    );
+    const lat = row.latitude || row.lat || row["широта"];
+    const lon = row.longitude || row.lon || row.lng || row["долгота"];
+    if (lat && lon) {
+      return {
+        name: row.name || row["название"] || row.city || row["город"],
+        latitude: lat.replace(",", "."),
+        longitude: lon.replace(",", "."),
+      };
+    }
+    return row.address || row["адрес"] || row.city || row["город"]
+      || row.name || row["название"];
+  }).filter(Boolean);
+}
+
+function normalizeImportedLocation(item, index) {
+  return {
+    id: item.id || `import-${Date.now()}-${index}`,
+    name: item.name || `Точка ${index + 1}`,
+    latitude: Number(String(item.latitude).replace(",", ".")),
+    longitude: Number(String(item.longitude).replace(",", ".")),
+    elevation_m: item.elevation_m ?? null,
+    timezone: item.timezone || "Europe/Moscow",
+    group: item.group || "Импорт",
+    output_name: item.output_name || null,
+  };
+}
+
+function parseCoordinates(text) {
+  const match = String(text).trim().match(
+    /^([+-]?\d{1,2}(?:[.,]\d+)?)\s*[,;\s]\s*([+-]?\d{1,3}(?:[.,]\d+)?)$/,
+  );
+  if (!match) return null;
+  const lat = Number(match[1].replace(",", "."));
+  const lon = Number(match[2].replace(",", "."));
+  return lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180
+    ? [lat, lon]
+    : null;
+}
+
 async function loadSources() {
   state.sources = await api("/api/v1/sources");
-  const sourceIds = new Set(state.sources.map((source) => source.source_id));
+  const available = new Set(state.sources.map((item) => item.source_id));
   state.selectedSources = new Set(
-    [...state.selectedSources].filter((id) => sourceIds.has(id)),
+    [...state.selectedSources].filter((id) => available.has(id)),
   );
-  if (!state.selectedSources.size) {
-    for (const id of recommendedSourceIds) {
-      if (sourceIds.has(id)) {
-        state.selectedSources.add(id);
-      }
-    }
-  }
-  for (const source of state.sources) {
-    if (!state.sourceDays.has(source.source_id)) {
-      state.sourceDays.set(
-        source.source_id,
-        Math.min(source.horizon_days, source.source_id.includes("gefs_0p5") ? 16 : 7),
-      );
-    }
-  }
+  if (!state.selectedSources.size) selectRecommendedSources(false);
   renderSources();
-  savePreferences();
-  updateSelectionSummary();
+}
+
+function selectRecommendedSources(render = true) {
+  const recommended = state.diagnostics?.default_sources || [
+    "open_meteo_gfs",
+    "open_meteo_ecmwf_ifs",
+    "open_meteo_dwd_icon_global",
+    "open_meteo_gefs_0p25",
+  ];
+  const available = new Set(state.sources.map((item) => item.source_id));
+  state.selectedSources = new Set(
+    recommended.filter((id) => available.has(id)),
+  );
+  if (render) renderSources();
 }
 
 function renderSources() {
-  const container = document.querySelector("#sourcesList");
-  if (!state.sources.length) {
-    container.innerHTML = '<div class="empty-state">Источники не зарегистрированы.</div>';
-    return;
-  }
-  const sorted = [...state.sources].sort((left, right) => {
-    const kindDifference = Number(isEnsemble(left)) - Number(isEnsemble(right));
-    return kindDifference || left.provider.localeCompare(right.provider, "ru");
-  });
-  container.innerHTML = sorted
-    .map((source) => {
-      const selected = state.selectedSources.has(source.source_id);
-      const directUnavailable = source.source_id === "noaa_gfs_0p25"
-        && state.diagnostics
-        && !state.diagnostics.eccodes_python;
-      const days = state.sourceDays.get(source.source_id) || Math.min(7, source.horizon_days);
-      return `
-        <article class="source-card ${selected ? "selected" : ""}">
-          <input
-            class="source-selector"
-            type="checkbox"
-            data-source-select="${escapeAttribute(source.source_id)}"
-            ${selected ? "checked" : ""}
-            aria-label="Выбрать ${escapeAttribute(source.name)}"
-          >
-          <div>
-            <h3>${escapeHtml(source.name)}</h3>
-            <p>${escapeHtml(source.notes || `${source.provider} · ${source.model}`)}</p>
-            <div class="source-meta">
-              <span class="source-tag">${isEnsemble(source) ? "Ансамбль" : "Детерминированная"}</span>
-              <span class="source-tag">до ${source.horizon_days} сут.</span>
-              <span class="source-tag">${source.exact_cycle ? "точный цикл" : "цикл не передаётся"}</span>
-              ${directUnavailable ? '<span class="source-tag">нужен ecCodes</span>' : ""}
-            </div>
-          </div>
-          <div class="source-days">
-            <label for="days-${escapeAttribute(source.source_id)}">Суток</label>
-            <input
-              id="days-${escapeAttribute(source.source_id)}"
-              data-source-days="${escapeAttribute(source.source_id)}"
-              type="number"
-              min="1"
-              max="${source.horizon_days}"
-              value="${days}"
-            >
-          </div>
-        </article>
-      `;
-    })
-    .join("");
-}
-
-function handleSourceChange(event) {
-  const selector = event.target.closest("[data-source-select]");
-  if (selector) {
-    if (selector.checked) {
-      state.selectedSources.add(selector.dataset.sourceSelect);
-    } else {
-      state.selectedSources.delete(selector.dataset.sourceSelect);
-    }
-    renderSources();
-    savePreferences();
-    updateSelectionSummary();
-    return;
-  }
-
-  const daysInput = event.target.closest("[data-source-days]");
-  if (daysInput) {
-    const source = state.sources.find((item) => item.source_id === daysInput.dataset.sourceDays);
-    const days = clamp(
-      Number(daysInput.value) || 1,
-      1,
-      source?.horizon_days || 35,
-    );
-    state.sourceDays.set(daysInput.dataset.sourceDays, days);
-    daysInput.value = String(days);
-    savePreferences();
-  }
-}
-
-function selectRecommendedSources() {
-  const available = new Set(state.sources.map((source) => source.source_id));
-  state.selectedSources = new Set(
-    [...recommendedSourceIds].filter((id) => available.has(id)),
+  const deterministic = state.sources.filter(
+    (item) => sourceKind(item) !== "ensemble" && item.source_id !== "demo",
   );
-  renderSources();
-  savePreferences();
-  updateSelectionSummary();
+  const ensembles = state.sources.filter(
+    (item) => sourceKind(item) === "ensemble",
+  );
+  byId("deterministicSources").innerHTML = deterministic.length
+    ? deterministic.map(modelCard).join("")
+    : '<div class="empty">Нет источников.</div>';
+  byId("ensembleSources").innerHTML = ensembles.length
+    ? ensembles.map(modelCard).join("")
+    : '<div class="empty">Нет ансамблей.</div>';
+  updateSummary();
 }
 
-function clearSources() {
-  state.selectedSources.clear();
+function modelCard(source) {
+  const selected = state.selectedSources.has(source.source_id);
+  return `<label class="model ${selected ? "selected" : ""}">
+    <input type="checkbox" data-source="${escapeAttribute(source.source_id)}" ${selected ? "checked" : ""}>
+    <span><strong>${escapeHtml(source.model)}</strong><small>${escapeHtml(source.notes || source.provider)} · до ${source.horizon_days} сут.</small></span>
+  </label>`;
+}
+
+function sourceKind(source) {
+  if (typeof source.source_kind === "string") return source.source_kind;
+  if (/ensemble|gefs|geps|eps/i.test(`${source.source_id} ${source.model}`)) {
+    return "ensemble";
+  }
+  return "deterministic";
+}
+
+function selectSource(event) {
+  const checkbox = event.target.closest("[data-source]");
+  if (!checkbox) return;
+  if (checkbox.checked) state.selectedSources.add(checkbox.dataset.source);
+  else state.selectedSources.delete(checkbox.dataset.source);
   renderSources();
-  savePreferences();
-  updateSelectionSummary();
 }
 
 async function createJob() {
-  const locations = state.locations.filter((location) => state.selectedLocations.has(location.id));
-  const sources = state.sources
-    .filter((source) => state.selectedSources.has(source.source_id))
-    .map((source) => ({
-      source_id: source.source_id,
-      forecast_days: state.sourceDays.get(source.source_id) || Math.min(7, source.horizon_days),
-      options: isEnsemble(source)
-        ? {precipitation_threshold_mm: 0.1}
-        : {},
-    }));
-
+  const locations = state.locations.filter(
+    (item) => state.selectedLocations.has(item.id),
+  );
+  const sources = state.sources.filter(
+    (item) => state.selectedSources.has(item.source_id),
+  );
   if (!locations.length) {
-    reportError(new Error("Выберите минимум одну координату."));
-    return;
+    return reportError(new Error("Выберите хотя бы одну точку."));
   }
   if (!sources.length) {
-    reportError(new Error("Выберите минимум одну прогностическую модель."));
-    return;
+    return reportError(new Error("Выберите хотя бы одну модель."));
   }
-
+  const days = Math.max(
+    1,
+    Math.min(35, Number(byId("forecastDays").value) || 7),
+  );
+  const thresholds = byId("precipitationThresholds").value
+    .split(/[;,\s]+/)
+    .map(Number)
+    .filter((value) => Number.isFinite(value) && value >= 0);
   const payload = {
-    batch_name: nullableValue("#batchName"),
+    batch_name: `forecast_${new Date().toISOString().slice(0, 10)}`,
     locations,
-    sources,
+    sources: sources.map((source) => ({
+      source_id: source.source_id,
+      forecast_days: Math.min(days, source.horizon_days),
+      options: sourceKind(source) === "ensemble"
+        ? {precipitation_thresholds_mm: thresholds.length ? thresholds : [0.1, 1, 5]}
+        : {},
+    })),
     document: {
-      title: value("#documentTitle") || "Метеорологический прогноз",
-      summary_interval_hours: numberValue("#summaryInterval", 3),
-      extended_summary_interval_hours: numberValue("#extendedSummaryInterval", 6),
+      title: byId("documentTitle").value.trim() || "Метеорологический прогноз",
+      summary_interval_hours: 3,
+      extended_summary_interval_hours: 6,
       summary_switch_hour: 120,
-      include_detailed_table: checked("#includeDetailed"),
-      include_all_parameters: checked("#includeAllParameters"),
-      parameter_profile: checked("#includeAllParameters") ? "all" : "operational",
-      page_size: value("#pageSize"),
+      ensemble_interval_hours: 6,
+      ensemble_extended_interval_hours: 12,
+      ensemble_switch_hour: 120,
+      include_detailed_table: true,
+      include_all_parameters: byId("parameterProfile").value !== "operational",
+      include_ensemble_section: true,
+      parameter_profile: byId("parameterProfile").value,
+      page_size: byId("pageSize").value,
       language: "ru",
-      organisation: nullableValue("#organisation"),
-      prepared_by: nullableValue("#preparedBy"),
+      organisation: null,
+      prepared_by: null,
     },
   };
-
-  const button = document.querySelector("#createJob");
-  setBusy(button, true, "Постановка в очередь…");
+  const button = byId("createJob");
+  busy(button, true, "Постановка в очередь…");
   try {
-    const job = await api("/api/v1/jobs", {
+    await api("/api/v1/jobs", {
       method: "POST",
       body: JSON.stringify(payload),
     });
-    savePreferences();
     await loadJobs();
-    showToast(`Задание ${job.id.slice(0, 8)} поставлено в очередь.`);
-    document.querySelector("#jobsHeading").scrollIntoView({behavior: "smooth", block: "start"});
+    toast("Задание создано.");
   } catch (error) {
     reportError(error);
   } finally {
-    setBusy(button, false, "Сформировать документы");
+    busy(button, false, "Сформировать документы");
   }
 }
 
 async function loadJobs() {
-  state.jobs = await api("/api/v1/jobs?limit=100");
+  state.jobs = await api("/api/v1/jobs?limit=50");
   renderJobs();
 }
 
 function renderJobs() {
-  const container = document.querySelector("#jobsList");
-  if (!state.jobs.length) {
-    container.innerHTML = '<div class="empty-state">Заданий пока нет.</div>';
-    return;
-  }
-
-  container.innerHTML = state.jobs
-    .map((job) => {
-      const sources = job.request.sources
-        .map((source) => `<span class="source-tag">${escapeHtml(source.source_id)} · ${source.forecast_days} сут.</span>`)
-        .join("");
-      const artifacts = (job.result?.artifacts || [])
-        .map((artifact, index) => `
-          <a
-            class="artifact-link"
-            href="/api/v1/jobs/${encodeURIComponent(job.id)}/artifacts/${index}"
-          >
-            ${artifactIcon(artifact.kind)} ${escapeHtml(artifact.kind.toUpperCase())}
-            ${artifact.location_id ? ` · ${escapeHtml(artifact.location_id)}` : ""}
-          </a>
-        `)
-        .join("");
-      const errors = [
-        ...(job.error ? [job.error] : []),
-        ...(job.result?.errors || []),
-      ];
-      const isActive = ["queued", "running"].includes(job.status);
-      const canRetry = ["completed", "partial", "failed", "cancelled"].includes(job.status);
-      const actions = [
-        isActive
-          ? `<button class="button button-danger button-small" type="button" data-cancel-job="${escapeAttribute(job.id)}">Отменить</button>`
-          : "",
-        canRetry
-          ? `<button class="button button-secondary button-small" type="button" data-retry-job="${escapeAttribute(job.id)}">Повторить</button>`
-          : "",
-      ].join("");
-
-      return `
-        <article class="job-card">
-          <div>
-            <h3>${escapeHtml(job.request.batch_name || `Задание ${job.id.slice(0, 8)}`)}</h3>
-            <p>${formatDateTime(job.created_at_utc)} · ${job.request.locations.length} точек</p>
-            <div class="status-chip ${statusClasses[job.status] || "status-neutral"}">
-              ${escapeHtml(statusLabels[job.status] || job.status)}
-            </div>
-          </div>
-          <div>
-            <div class="job-sources">${sources}</div>
-            ${artifacts ? `<div class="artifact-list">${artifacts}</div>` : ""}
-            ${errors.length ? `<p class="job-error">${escapeHtml(errors.join(" · "))}</p>` : ""}
-          </div>
-          <div class="job-actions">${actions}</div>
-        </article>
-      `;
-    })
-    .join("");
+  byId("jobsList").innerHTML = state.jobs.length
+    ? state.jobs.map((job) => {
+      const artifacts = (job.result?.artifacts || []).map((artifact, index) => `
+        <a class="artifact" href="/api/v1/jobs/${encodeURIComponent(job.id)}/artifacts/${index}">
+          ${escapeHtml(artifact.kind.toUpperCase())}${artifact.location_id ? ` · ${escapeHtml(artifact.location_id)}` : ""}
+        </a>`).join("");
+      const active = ["queued", "running"].includes(job.status);
+      const retry = ["completed", "partial", "failed", "cancelled"].includes(job.status);
+      return `<article class="job">
+        <div><h3>${escapeHtml(job.request.batch_name || job.id.slice(0, 8))}</h3><p>${escapeHtml(statusNames[job.status] || job.status)} · ${job.request.locations.length} точек</p></div>
+        <div class="artifacts">${artifacts || '<span class="muted">Результат ещё не готов.</span>'}</div>
+        <div>${active ? `<button class="button ghost" data-cancel-job="${job.id}">Отменить</button>` : ""}${retry ? `<button class="button secondary" data-retry-job="${job.id}">Повторить</button>` : ""}</div>
+      </article>`;
+    }).join("")
+    : '<div class="empty">Заданий пока нет.</div>';
 }
 
-async function handleJobAction(event) {
-  const cancelButton = event.target.closest("[data-cancel-job]");
-  const retryButton = event.target.closest("[data-retry-job]");
-  const button = cancelButton || retryButton;
-  if (!button) {
-    return;
-  }
-  setBusy(button, true, "Выполнение…");
+async function jobAction(event) {
+  const cancel = event.target.closest("[data-cancel-job]");
+  const retry = event.target.closest("[data-retry-job]");
+  if (!cancel && !retry) return;
+  const button = cancel || retry;
+  const jobId = cancel ? cancel.dataset.cancelJob : retry.dataset.retryJob;
   try {
-    if (cancelButton) {
-      await api(`/api/v1/jobs/${encodeURIComponent(cancelButton.dataset.cancelJob)}/cancel`, {
-        method: "POST",
-      });
-      showToast("Задание отменено.");
-    } else {
-      await api(`/api/v1/jobs/${encodeURIComponent(retryButton.dataset.retryJob)}/retry`, {
-        method: "POST",
-      });
-      showToast("Создано повторное задание.");
-    }
+    await api(
+      `/api/v1/jobs/${encodeURIComponent(jobId)}/${cancel ? "cancel" : "retry"}`,
+      {method: "POST"},
+    );
     await loadJobs();
   } catch (error) {
     reportError(error);
-  } finally {
-    setBusy(button, false, cancelButton ? "Отменить" : "Повторить");
   }
 }
 
-function updateSelectionSummary() {
-  const locations = state.selectedLocations.size;
-  const sources = state.selectedSources.size;
-  const summary = document.querySelector("#selectionSummary");
-  if (!locations || !sources) {
-    summary.textContent = `Выбрано точек: ${locations}; моделей: ${sources}`;
-    return;
-  }
-  const documents = locations;
-  const sections = locations * sources;
-  summary.textContent = `Будет создано документов: ${documents}; модельных секций: ${sections}`;
+function updateSummary() {
+  const deterministic = state.sources.filter(
+    (item) => state.selectedSources.has(item.source_id)
+      && sourceKind(item) !== "ensemble",
+  ).length;
+  const ensembles = state.sources.filter(
+    (item) => state.selectedSources.has(item.source_id)
+      && sourceKind(item) === "ensemble",
+  ).length;
+  byId("selectionSummary").textContent = `${state.selectedLocations.size} точек · ${deterministic} моделей · ${ensembles} ансамблей`;
+  byId("locationCount").textContent = `${state.selectedLocations.size} выбрано`;
 }
 
-function restorePreferences() {
-  try {
-    const saved = JSON.parse(localStorage.getItem("weather-to-docx-preferences") || "{}");
-    state.selectedSources = new Set(saved.selectedSources || []);
-    state.sourceDays = new Map(Object.entries(saved.sourceDays || {}).map(([key, value]) => [key, Number(value)]));
-    for (const [selector, valueToSet] of Object.entries(saved.form || {})) {
-      const element = document.querySelector(selector);
-      if (!element) {
-        continue;
-      }
-      if (element.type === "checkbox") {
-        element.checked = Boolean(valueToSet);
-      } else {
-        element.value = valueToSet;
-      }
-    }
-  } catch {
-    localStorage.removeItem("weather-to-docx-preferences");
-  }
-}
-
-function savePreferences() {
-  const formSelectors = [
-    "#batchName",
-    "#documentTitle",
-    "#pageSize",
-    "#summaryInterval",
-    "#extendedSummaryInterval",
-    "#organisation",
-    "#preparedBy",
-    "#includeDetailed",
-    "#includeAllParameters",
-  ];
-  const form = {};
-  for (const selector of formSelectors) {
-    const element = document.querySelector(selector);
-    form[selector] = element.type === "checkbox" ? element.checked : element.value;
-  }
-  const payload = {
-    selectedSources: [...state.selectedSources],
-    sourceDays: Object.fromEntries(state.sourceDays),
-    form,
-  };
-  localStorage.setItem("weather-to-docx-preferences", JSON.stringify(payload));
-}
-
-function setHealth(text, className) {
-  const badge = document.querySelector("#healthBadge");
+function setHealth(text, status) {
+  const badge = byId("healthBadge");
   badge.textContent = text;
-  badge.className = `status-chip ${className}`;
+  badge.className = `badge ${status}`;
 }
 
-function setBusy(button, busy, busyLabel) {
-  if (busy) {
-    button.dataset.originalLabel = button.textContent;
-    button.textContent = busyLabel;
+function busy(button, active, text) {
+  if (active) {
+    button.dataset.label = button.textContent;
+    button.textContent = text;
     button.disabled = true;
   } else {
-    button.textContent = button.dataset.originalLabel || busyLabel;
+    button.textContent = button.dataset.label || text;
     button.disabled = false;
   }
 }
 
-function showToast(message, isError = false) {
-  const toast = document.querySelector("#toast");
-  toast.textContent = message;
-  toast.className = `toast visible${isError ? " error" : ""}`;
-  window.clearTimeout(state.toastTimer);
-  state.toastTimer = window.setTimeout(() => {
-    toast.className = "toast";
-  }, isError ? 7000 : 3500);
-}
-
 function reportError(error) {
   console.error(error);
-  showToast(error instanceof Error ? error.message : String(error), true);
+  toast(error instanceof Error ? error.message : String(error), true);
 }
 
-function isEnsemble(source) {
-  return /ensemble|gefs|geps|eps/i.test(`${source.source_id} ${source.model}`);
+function toast(text, error = false) {
+  const element = byId("toast");
+  element.textContent = text;
+  element.className = `toast visible${error ? " error" : ""}`;
+  clearTimeout(state.toastTimer);
+  state.toastTimer = setTimeout(() => {
+    element.className = "toast";
+  }, error ? 7000 : 3500);
 }
 
-function artifactIcon(kind) {
-  if (kind === "docx") {
-    return "📄";
-  }
-  if (kind === "zip") {
-    return "🗂";
-  }
-  if (kind === "manifest") {
-    return "🔎";
-  }
-  return "⬇";
+function download(name, content, type) {
+  const url = URL.createObjectURL(new Blob([content], {type}));
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
-function value(selector) {
-  return document.querySelector(selector).value.trim();
+function byId(id) {
+  return document.getElementById(id);
 }
 
-function nullableValue(selector) {
-  const result = value(selector);
-  return result === "" ? null : result;
-}
-
-function numberValue(selector, fallback) {
-  const result = Number(value(selector));
-  return Number.isFinite(result) ? result : fallback;
-}
-
-function checked(selector) {
-  return document.querySelector(selector).checked;
-}
-
-function setValue(selector, newValue) {
-  document.querySelector(selector).value = newValue;
-}
-
-function clamp(number, minimum, maximum) {
-  return Math.min(maximum, Math.max(minimum, number));
-}
-
-function formatNumber(number, digits) {
-  return Number(number).toLocaleString("ru-RU", {
+function format(value, digits) {
+  return Number(value).toLocaleString("ru-RU", {
     minimumFractionDigits: digits,
     maximumFractionDigits: digits,
   });
 }
 
-function formatDateTime(valueToFormat) {
-  try {
-    return new Intl.DateTimeFormat("ru-RU", {
-      dateStyle: "short",
-      timeStyle: "short",
-    }).format(new Date(valueToFormat));
-  } catch {
-    return valueToFormat;
-  }
-}
-
-function downloadBlob(filename, content, type) {
-  const blob = new Blob([content], {type});
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
-function escapeHtml(valueToEscape) {
-  return String(valueToEscape ?? "")
+function escapeHtml(value) {
+  return String(value ?? "")
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -839,6 +614,6 @@ function escapeHtml(valueToEscape) {
     .replaceAll("'", "&#039;");
 }
 
-function escapeAttribute(valueToEscape) {
-  return escapeHtml(valueToEscape).replaceAll("`", "&#096;");
+function escapeAttribute(value) {
+  return escapeHtml(value).replaceAll("`", "&#096;");
 }

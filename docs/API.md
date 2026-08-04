@@ -1,101 +1,193 @@
 # 🔌 HTTP API
 
-API предназначен для постановки пакетных заданий, контроля очереди и загрузки созданных файлов. Интерактивная схема доступна по `/docs`, OpenAPI JSON — по `/openapi.json`.
+API обслуживает веб-интерфейс, справочник точек, DaData, очередь заданий и загрузку результатов.
+
+Интерактивная схема:
+
+```text
+http://127.0.0.1:8080/docs
+```
+
+OpenAPI JSON:
+
+```text
+http://127.0.0.1:8080/openapi.json
+```
 
 ## Запуск
 
+Установленная служба:
+
 ```bash
-weather-to-docx api --host 127.0.0.1 --port 8080
+sudo systemctl start weather-to-docx-api weather-to-docx-worker
+```
+
+Ручной запуск с параметрами из `WTD_API_HOST` и `WTD_API_PORT`:
+
+```bash
+weather-to-docx-api
 weather-to-docx worker --poll-interval 5
 ```
 
-В установленной системе API и worker запускаются отдельными systemd-службами.
-
-## Системные методы
+## Состояние системы
 
 ### `GET /health`
 
 ```json
 {
   "status": "ok",
-  "version": "0.1.0"
+  "version": "0.3.0"
 }
 ```
 
 ### `GET /api/v1/diagnostics`
 
-Показывает пути данных, доступность записи, наличие `zstd`, Python-модуля `eccodes` и политику подписи прогнозных пакетов. Секретные ключи в ответ не попадают.
+Возвращает:
+
+- версию;
+- пути базы и документов;
+- доступность записи;
+- наличие `zstd` и ecCodes;
+- число детерминированных и ансамблевых источников;
+- состояние DaData и Telegram;
+- набор моделей и горизонт по умолчанию.
+
+DaData token, secret и Telegram token не возвращаются.
+
+## Геокодирование
+
+### `POST /api/v1/geocoding/suggest`
+
+Интерактивные подсказки DaData:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/api/v1/geocoding/suggest \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"Псков","count":5}'
+```
+
+### `POST /api/v1/geocoding/resolve`
+
+Один выбранный адрес:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/api/v1/geocoding/resolve \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"Псков","automatic":false}'
+```
+
+При `automatic=true` используется DaData Clean API, если задан `WTD_DADATA_SECRET`. Без secret возвращается первая подсказка.
+
+### `POST /api/v1/geocoding/reverse`
+
+```bash
+curl -sS -X POST http://127.0.0.1:8080/api/v1/geocoding/reverse \
+  -H 'Content-Type: application/json' \
+  -d '{"latitude":57.8193,"longitude":28.3325,"count":1}'
+```
 
 ## Источники
 
 ### `GET /api/v1/sources`
 
-Возвращает зарегистрированные адаптеры и их свойства.
-
 ```bash
-curl -sS http://127.0.0.1:8080/api/v1/sources | python -m json.tool
+curl -sS http://127.0.0.1:8080/api/v1/sources \
+  | python3 -m json.tool
+```
+
+Для каждого адаптера возвращаются:
+
+```json
+{
+  "source_id": "open_meteo_gefs_0p25",
+  "name": "NOAA GEFS 0.25° через Open-Meteo",
+  "provider": "Open-Meteo / NOAA",
+  "model": "NOAA GEFS 0.25°",
+  "horizon_days": 10,
+  "exact_cycle": false,
+  "source_kind": "ensemble",
+  "implementation_status": "ready"
+}
+```
+
+`source_kind` принимает:
+
+```text
+deterministic
+ensemble
+synthetic
+```
+
+## Справочник координат
+
+### `GET /api/v1/locations`
+
+Параметры:
+
+- `group` — необязательная группа;
+- `limit` — от 1 до 10000.
+
+### `POST /api/v1/locations`
+
+```json
+{
+  "id": "pskov",
+  "name": "Псков",
+  "latitude": 57.8193,
+  "longitude": 28.3325,
+  "elevation_m": 45,
+  "timezone": "Europe/Moscow",
+  "group": "Основные",
+  "output_name": null
+}
+```
+
+### `GET /api/v1/locations/{location_id}`
+
+### `PUT /api/v1/locations/{location_id}`
+
+### `DELETE /api/v1/locations/{location_id}`
+
+### `POST /api/v1/locations/import`
+
+```json
+{
+  "replace_existing": false,
+  "locations": [
+    {
+      "id": "pskov",
+      "name": "Псков",
+      "latitude": 57.8193,
+      "longitude": 28.3325,
+      "timezone": "Europe/Moscow"
+    }
+  ]
+}
+```
+
+### `GET /api/v1/locations/export`
+
+Совместимый адрес:
+
+```text
+/api/v1/location-catalog/export
 ```
 
 ## Задания
 
 ### `POST /api/v1/jobs`
 
-Создаёт задание в SQLite-очереди.
-
-```bash
-curl -sS -X POST http://127.0.0.1:8080/api/v1/jobs \
-  -H 'Content-Type: application/json' \
-  --data-binary @examples/job.json
-```
-
-### `GET /api/v1/jobs`
-
-Параметры:
-
-- `limit` — от 1 до 1000;
-- `status` — `queued`, `running`, `completed`, `partial`, `failed`, `cancelled`.
-
-```bash
-curl -sS 'http://127.0.0.1:8080/api/v1/jobs?status=completed&limit=20'
-```
-
-### `GET /api/v1/jobs/{job_id}`
-
-Возвращает состояние, исходный запрос, ошибки и артефакты.
-
-### `POST /api/v1/jobs/{job_id}/cancel`
-
-Отмечает ожидающее или выполняющееся задание отменённым. Уже начатый HTTP-запрос может завершиться, однако итог отменённого задания не переводится в состояние `completed`.
-
-### `POST /api/v1/jobs/{job_id}/retry`
-
-Создаёт новое задание на основе завершённого, частичного, ошибочного или отменённого.
-
-## Артефакты
-
-### `GET /api/v1/jobs/{job_id}/artifacts/{artifact_index}`
-
-Выдаёт DOCX, JSON-манифест или ZIP. Путь проверяется относительно разрешённого каталога документов, поэтому произвольный файл системы скачать через метод нельзя.
-
-Пример:
-
-```bash
-curl -fLo result.docx \
-  http://127.0.0.1:8080/api/v1/jobs/JOB_ID/artifacts/0
-```
-
-## Пример тела задания
+Пример с двумя детерминированными моделями и одним ансамблем:
 
 ```json
 {
   "batch_name": "forecast_for_objects",
   "locations": [
     {
-      "id": "spb-office",
-      "name": "Санкт-Петербург, объект 1",
-      "latitude": 59.9386,
-      "longitude": 30.3141,
-      "elevation_m": 12,
+      "id": "pskov",
+      "name": "Псков",
+      "latitude": 57.8193,
+      "longitude": 28.3325,
       "timezone": "Europe/Moscow"
     }
   ],
@@ -104,6 +196,18 @@ curl -fLo result.docx \
       "source_id": "open_meteo_gfs",
       "forecast_days": 7,
       "options": {}
+    },
+    {
+      "source_id": "open_meteo_ecmwf_ifs",
+      "forecast_days": 7,
+      "options": {}
+    },
+    {
+      "source_id": "open_meteo_gefs_0p25",
+      "forecast_days": 7,
+      "options": {
+        "precipitation_thresholds_mm": [0.1, 1.0, 5.0]
+      }
     }
   ],
   "document": {
@@ -112,20 +216,75 @@ curl -fLo result.docx \
     "summary_interval_hours": 3,
     "extended_summary_interval_hours": 6,
     "summary_switch_hour": 120,
+    "ensemble_interval_hours": 6,
+    "ensemble_extended_interval_hours": 12,
+    "ensemble_switch_hour": 120,
     "include_detailed_table": true,
+    "include_all_parameters": true,
+    "include_ensemble_section": true,
+    "parameter_profile": "extended",
     "language": "ru"
   }
 }
 ```
 
-## Ошибки
+Результирующий DOCX всегда располагает детерминированные модели первыми. Все ансамблевые источники выводятся одной отдельной таблицей в конце.
 
-- `404` — задание или артефакт не найден;
-- `409` — операция не соответствует текущему состоянию;
-- `422` — структура запроса или координаты некорректны;
-- `403` — путь артефакта вышел за разрешённый каталог;
-- `500` — непредвиденная ошибка приложения; подробности записываются в журнал systemd.
+### `GET /api/v1/jobs`
 
-## Защита внешнего доступа
+Параметры:
 
-Текущая версия не реализует собственную корпоративную аутентификацию. По умолчанию systemd запускает API только на `127.0.0.1`. Для доступа по сети следует разместить перед приложением Nginx/HAProxy с TLS, ограничением адресов и принятой в организации схемой аутентификации.
+- `limit` — от 1 до 1000;
+- `status` — `queued`, `running`, `completed`, `partial`, `failed`, `cancelled`.
+
+### `GET /api/v1/jobs/{job_id}`
+
+Возвращает запрос, статус, ошибки, предупреждения и артефакты.
+
+### `POST /api/v1/jobs/{job_id}/cancel`
+
+### `POST /api/v1/jobs/{job_id}/retry`
+
+## Артефакты
+
+### `GET /api/v1/jobs/{job_id}/artifacts/{artifact_index}`
+
+Виды:
+
+```text
+docx
+manifest
+zip
+```
+
+Пример:
+
+```bash
+curl -fLo result.docx \
+  http://127.0.0.1:8080/api/v1/jobs/JOB_ID/artifacts/0
+```
+
+Путь проверяется относительно каталога документов. Произвольный системный файл через этот метод получить нельзя.
+
+## Коды ошибок
+
+| Код | Значение |
+|---:|---|
+| 403 | недопустимый путь или ограничение доступа |
+| 404 | точка, задание, кандидат или артефакт не найден |
+| 409 | конфликт идентификатора или недопустимое состояние |
+| 422 | ошибка структуры данных |
+| 502 | внешний сервис DaData или источник прогноза недоступен |
+| 503 | интеграция не настроена |
+
+## Доступ из сети
+
+Приложение не реализует собственную корпоративную аутентификацию. По умолчанию API слушает `127.0.0.1`.
+
+Для сетевого доступа используйте Nginx или HAProxy с:
+
+- TLS;
+- ограничением адресов;
+- принятой в организации аутентификацией;
+- лимитами размера запросов;
+- журналом доступа.

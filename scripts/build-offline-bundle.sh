@@ -54,8 +54,10 @@ cp -a "$ROOT_DIR/packaging/systemd/." "$STAGE/systemd/"
 cp "$ROOT_DIR/packaging/weather-to-docx.env" "$STAGE/weather-to-docx.env.example"
 cp "$ROOT_DIR/scripts/install.sh" "$ROOT_DIR/scripts/upgrade.sh" \
    "$ROOT_DIR/scripts/rollback.sh" "$ROOT_DIR/scripts/doctor.sh" \
-   "$ROOT_DIR/scripts/uninstall.sh" "$STAGE/"
-chmod 0755 "$STAGE"/*.sh
+   "$ROOT_DIR/scripts/uninstall.sh" "$ROOT_DIR/scripts/configure.sh" \
+   "$ROOT_DIR/scripts/setup.sh" "$STAGE/"
+cp "$ROOT_DIR/scripts/configure.sh" "$STAGE/scripts/"
+chmod 0755 "$STAGE"/*.sh "$STAGE/scripts"/*.sh
 
 if [[ -d "$APT_REPOSITORY" && -f "$APT_REPOSITORY/Packages" ]]; then
   echo "==> Добавление локального APT-репозитория"
@@ -84,7 +86,9 @@ cat > "$STAGE/build-info.json" <<JSON
   "python": "$($PYTHON_BIN -VV 2>&1 | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g')",
   "grib_python_enabled": $([[ "$INCLUDE_GRIB" == "1" ]] && echo true || echo false),
   "apt_repository_included": $([[ -d "$STAGE/apt-repository" ]] && echo true || echo false),
-  "private_runtime_included": $([[ -d "$STAGE/runtime" ]] && echo true || echo false)
+  "private_runtime_included": $([[ -d "$STAGE/runtime" ]] && echo true || echo false),
+  "telegram_entrypoint_included": true,
+  "interactive_configurator_included": true
 }
 JSON
 
@@ -93,10 +97,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
-try:
-    from packaging.utils import parse_wheel_filename
-except ImportError as exc:
-    raise SystemExit("Для формирования SBOM требуется пакет packaging, входящий в pip") from exc
+from packaging.utils import parse_wheel_filename
 
 wheelhouse = Path(sys.argv[1])
 output = Path(sys.argv[2])
@@ -152,4 +153,6 @@ fi
 echo "==> Офлайн-комплект готов"
 echo "    $ARCHIVE"
 echo "    $ARCHIVE.sha256"
-[[ -f "$ARCHIVE.asc" ]] && echo "    $ARCHIVE.asc"
+if [[ -f "$ARCHIVE.asc" ]]; then
+  echo "    $ARCHIVE.asc"
+fi

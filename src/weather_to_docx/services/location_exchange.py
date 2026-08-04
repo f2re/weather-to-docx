@@ -94,10 +94,7 @@ def locations_from_csv(content: bytes | str) -> list[Location]:
     необязательная первая строка ``sep=;`` и десятичная запятая.
     """
 
-    if isinstance(content, str):
-        raw = content.encode("utf-8")
-    else:
-        raw = content
+    raw = content.encode("utf-8") if isinstance(content, str) else content
     if not raw:
         raise ValueError("CSV-файл пуст")
     if len(raw) > MAX_LOCATION_CSV_BYTES:

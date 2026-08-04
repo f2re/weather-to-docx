@@ -60,13 +60,29 @@ jobs:
           assert len(wheels) == 1, wheels
           with ZipFile(wheels[0]) as archive:
               names = set(archive.namelist())
+              entry_points_name = next(
+                  name for name in names if name.endswith(".dist-info/entry_points.txt")
+              )
+              entry_points = archive.read(entry_points_name).decode("utf-8")
           required = {
               "weather_to_docx/static/index.html",
               "weather_to_docx/static/styles.css",
               "weather_to_docx/static/app.js",
+              "weather_to_docx/ensemble/science.py",
+              "weather_to_docx/document/scientific_generator.py",
+              "weather_to_docx/geocoding/dadata.py",
+              "weather_to_docx/telegram_bot.py",
+              "weather_to_docx/api_entrypoint.py",
+              "weather_to_docx/telegram_entrypoint.py",
           }
           missing = required - names
-          assert not missing, f"Статические файлы не вошли в wheel: {sorted(missing)}"
+          assert not missing, f"Файлы не вошли в wheel: {sorted(missing)}"
+          for command in (
+              "weather-to-docx",
+              "weather-to-docx-api",
+              "weather-to-docx-telegram",
+          ):
+              assert command in entry_points, entry_points
           PY
 
       - name: Сформировать автономный пример
@@ -77,10 +93,46 @@ jobs:
         env:
           INCLUDE_GRIB: "0"
           OUTPUT_DIR: dist/offline
+        shell: bash
         run: |
+          set -Eeuo pipefail
+          mkdir -p dist/offline
+          exec > >(tee dist/offline/offline-build.log) 2>&1
+          trap 'code=$?; echo "FAILED line=$LINENO command=$BASH_COMMAND exit=$code"; exit $code' ERR
+          set -x
+
           bash scripts/build-offline-bundle.sh
-          compgen -G 'dist/offline/weather-to-docx-offline-*.tar.zst' >/dev/null
-          sha256sum -c dist/offline/*.tar.zst.sha256
+          archive=$(find dist/offline -maxdepth 1 -type f -name 'weather-to-docx-offline-*.tar.zst' -print -quit)
+          test -n "$archive"
+          test -f "${archive}.sha256"
+          sha256sum -c "${archive}.sha256"
+          tar --zstd -tf "$archive" | tee dist/offline/contents.txt
+
+          required=(
+            '/setup.sh'
+            '/configure.sh'
+            '/systemd/weather-to-docx-telegram.service'
+            '/docs/ENSEMBLES.md'
+            '/docs/TELEGRAM.md'
+            '/docs/DADATA.md'
+          )
+          for suffix in "${required[@]}"; do
+            grep -Fq "$suffix" dist/offline/contents.txt || {
+              echo "В архиве отсутствует обязательный путь: $suffix" >&2
+              exit 1
+            }
+          done
+
+      - name: Сохранить диагностику офлайн-комплекта
+        if: always() && matrix.python-version == '3.11'
+        uses: actions/upload-artifact@v4
+        with:
+          name: offline-bundle-diagnostics
+          path: |
+            dist/offline/offline-build.log
+            dist/offline/contents.txt
+            dist/offline/*.sha256
+          if-no-files-found: warn
 
       - name: Сохранить DOCX-пример
         if: matrix.python-version == '3.11'

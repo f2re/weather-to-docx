@@ -11,12 +11,8 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from weather_to_docx import __version__
-from weather_to_docx.domain.models import (
-    BatchRequest,
-    JobRecord,
-    JobStatus,
-    Location,
-)
+from weather_to_docx.api.geocoding import create_geocoding_router
+from weather_to_docx.domain.models import BatchRequest, JobRecord, JobStatus, Location
 from weather_to_docx.settings import Settings, get_settings
 from weather_to_docx.sources.registry import SourceRegistry
 from weather_to_docx.storage.jobs import JobRepository
@@ -42,22 +38,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         title="Weather to DOCX API",
         version=__version__,
         description=(
-            "Справочник координат, источники прогноза и очередь пакетного "
-            "формирования метеорологических документов."
+            "Геокодирование, справочник координат, источники прогноза и очередь "
+            "пакетного формирования метеорологических документов."
         ),
     )
     app.state.settings = settings
     app.state.repository = repository
     app.state.locations = locations
     app.state.registry = registry
+    app.include_router(create_geocoding_router(settings))
 
     static_dir = Path(__file__).resolve().parent.parent / "static"
     if static_dir.is_dir():
-        app.mount(
-            "/static",
-            StaticFiles(directory=static_dir),
-            name="static",
-        )
+        app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
     @app.get("/", include_in_schema=False, response_model=None)
     def operator_interface() -> Response:
@@ -65,7 +58,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if index.is_file():
             return FileResponse(index)
         return HTMLResponse(
-            "<h1>Weather to DOCX</h1><p>Интерфейс не включён в установочный пакет.</p>",
+            "<h1>Weather to DOCX</h1><p>Интерфейс не включён в пакет.</p>",
             status_code=503,
         )
 
@@ -75,6 +68,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/v1/diagnostics", tags=["system"])
     def diagnostics() -> dict:
+        descriptors = registry.descriptors()
         return {
             "version": __version__,
             "data_dir": str(settings.data_dir),
@@ -91,7 +85,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 else None
             ),
             "location_count": len(locations.list(limit=10000)),
-            "source_count": len(registry.descriptors()),
+            "source_count": len(descriptors),
+            "deterministic_source_count": sum(
+                item.source_kind.value == "deterministic" for item in descriptors
+            ),
+            "ensemble_source_count": sum(
+                item.source_kind.value == "ensemble" for item in descriptors
+            ),
+            "dadata_configured": settings.dadata_configured,
+            "dadata_cleaner_configured": bool(settings.dadata_secret),
+            "telegram_enabled": settings.telegram_enabled,
+            "telegram_token_configured": bool(settings.telegram_bot_token),
+            "default_sources": list(settings.default_sources),
+            "default_forecast_days": settings.default_forecast_days,
         }
 
     @app.get("/api/v1/sources", tags=["sources"])
@@ -111,6 +117,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get(
         "/api/v1/location-catalog/export",
+        response_model=list[Location],
+        tags=["locations"],
+    )
+    @app.get(
+        "/api/v1/locations/export",
         response_model=list[Location],
         tags=["locations"],
     )
@@ -248,34 +259,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             artifact = job.result.artifacts[artifact_index]
         except IndexError as exc:
-            raise HTTPException(
-                status_code=404,
-                detail="Артефакт не найден",
-            ) from exc
+            raise HTTPException(status_code=404, detail="Артефакт не найден") from exc
         try:
-            path = ensure_within(
-                Path(artifact.path),
-                settings.documents_dir,
-            )
+            path = ensure_within(Path(artifact.path), settings.documents_dir)
         except ValueError as exc:
-            raise HTTPException(
-                status_code=403,
-                detail="Недопустимый путь артефакта",
-            ) from exc
+            raise HTTPException(status_code=403, detail="Недопустимый путь артефакта") from exc
         if not path.is_file():
-            raise HTTPException(
-                status_code=404,
-                detail="Файл артефакта отсутствует",
-            )
+            raise HTTPException(status_code=404, detail="Файл артефакта отсутствует")
         return FileResponse(path, filename=path.name)
 
     return app
 
 
-def _job_or_404(
-    repository: JobRepository,
-    job_id: str,
-) -> JobRecord:
+def _job_or_404(repository: JobRepository, job_id: str) -> JobRecord:
     try:
         return repository.get(job_id)
     except KeyError as exc:

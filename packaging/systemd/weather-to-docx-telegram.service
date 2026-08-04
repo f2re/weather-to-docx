@@ -1,19 +1,18 @@
 [Unit]
-Description=Weather to DOCX HTTP API
-Documentation=file:/opt/weather-to-docx/current/share/docs/API.md
-After=network.target
+Description=Weather to DOCX Telegram bot
+Documentation=file:/opt/weather-to-docx/current/share/README.md
+After=network-online.target weather-to-docx-worker.service
+Wants=network-online.target
 
 [Service]
 Type=simple
 User=weatherdoc
 Group=weatherdoc
 WorkingDirectory=/var/lib/weather-to-docx
-Environment=WTD_API_HOST=127.0.0.1
-Environment=WTD_API_PORT=8080
 EnvironmentFile=-/etc/weather-to-docx/weather-to-docx.env
-ExecStart=/opt/weather-to-docx/current/venv/bin/weather-to-docx api --host ${WTD_API_HOST} --port ${WTD_API_PORT}
+ExecStart=/opt/weather-to-docx/current/venv/bin/weather-to-docx-telegram
 Restart=on-failure
-RestartSec=5s
+RestartSec=10s
 TimeoutStopSec=30s
 UMask=0027
 NoNewPrivileges=true
