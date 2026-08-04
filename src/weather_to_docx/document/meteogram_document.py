@@ -15,12 +15,14 @@ from weather_to_docx.document.compact_generator import (
     MAX_ENSEMBLE_SYSTEMS,
     MAX_REPORT_DAYS,
     MINIMUM_MODEL_COMPLETENESS,
-    ScientificDocumentGenerator as CompactDocumentGenerator,
     _configure_compact_document,
     _is_ensemble,
     _report_dates,
     _select_models,
     _short_model_name,
+)
+from weather_to_docx.document.compact_generator import (
+    ScientificDocumentGenerator as CompactDocumentGenerator,
 )
 from weather_to_docx.document.styles import (
     DARK_BLUE,
