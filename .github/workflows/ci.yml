@@ -29,7 +29,7 @@ jobs:
       - name: Установить системные утилиты
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends zstd
 
-      - name: Установить LibreOffice для проверки числа страниц
+      - name: Установить LibreOffice для проверки страниц
         if: matrix.python-version == '3.11'
         run: |
           sudo apt-get install -y --no-install-recommends \
@@ -53,6 +53,9 @@ jobs:
           for script in scripts/*.sh; do bash -n "$script"; done
 
       - name: Тесты
+        env:
+          MPLBACKEND: Agg
+          MPLCONFIGDIR: /tmp/weather-to-docx-matplotlib
         run: pytest
 
       - name: Проверка компиляции
@@ -83,6 +86,10 @@ jobs:
               "weather_to_docx/ensemble/science.py",
               "weather_to_docx/document/scientific_generator.py",
               "weather_to_docx/document/compact_generator.py",
+              "weather_to_docx/document/meteogram_document.py",
+              "weather_to_docx/plotting/__init__.py",
+              "weather_to_docx/plotting/meteogram.py",
+              "weather_to_docx/plotting/smoothing.py",
               "weather_to_docx/domain/profiles.py",
               "weather_to_docx/geocoding/dadata.py",
               "weather_to_docx/geocoding/timezone.py",
@@ -102,6 +109,9 @@ jobs:
           PY
 
       - name: Сформировать автономный пример
+        env:
+          MPLBACKEND: Agg
+          MPLCONFIGDIR: /tmp/weather-to-docx-matplotlib-sample
         run: weather-to-docx sample --output var/ci-sample --hours 24
 
       - name: Собрать автономный комплект без GRIB-дополнения
