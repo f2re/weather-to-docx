@@ -3,8 +3,9 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
-from weather_to_docx.domain.models import Location
+from weather_to_docx.domain.models import Location, TimezoneSource
 from weather_to_docx.geocoding.dadata import DadataClient, GeocodedPlace
+from weather_to_docx.geocoding.timezone import resolve_timezone
 from weather_to_docx.settings import Settings
 
 
@@ -29,6 +30,8 @@ class GeocodingCandidate(BaseModel):
     address: str
     latitude: float
     longitude: float
+    timezone: str
+    timezone_source: TimezoneSource
     quality_code: str | None = None
     location: Location
 
@@ -88,12 +91,23 @@ def create_geocoding_router(settings: Settings) -> APIRouter:
     return router
 
 
-def _candidate(place: GeocodedPlace, timezone: str) -> GeocodingCandidate:
+def _candidate(place: GeocodedPlace, fallback_timezone: str) -> GeocodingCandidate:
+    timezone, timezone_source = resolve_timezone(
+        place.latitude,
+        place.longitude,
+        fallback=fallback_timezone,
+    )
+    source = TimezoneSource(timezone_source)
+    location = place.to_location(timezone=timezone).model_copy(
+        update={"timezone_source": source}
+    )
     return GeocodingCandidate(
         name=place.name,
         address=place.address,
         latitude=place.latitude,
         longitude=place.longitude,
+        timezone=timezone,
+        timezone_source=source,
         quality_code=place.quality_code,
-        location=place.to_location(timezone=timezone),
+        location=location,
     )
