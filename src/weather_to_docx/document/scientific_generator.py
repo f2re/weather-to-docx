@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime
 from pathlib import Path
 
 from docx import Document
@@ -27,8 +27,10 @@ from weather_to_docx.domain.models import (
     DocumentOptions,
     ForecastPoint,
     ForecastSeries,
+    LeadTimeReference,
     Location,
     SourceKind,
+    TimezoneSource,
 )
 
 
@@ -46,7 +48,14 @@ class ScientificDocumentGenerator(DocumentGenerator):
         if not series:
             raise ValueError("Для документа не передан ни один прогностический ряд")
         if any(item.location.id != location.id for item in series):
-            raise ValueError("В документ нельзя объединять прогнозы для разных координат")
+            raise ValueError(
+                "В документ нельзя объединять прогнозы для разных координат"
+            )
+        if options.page_size == "A4" and options.parameter_profile != "operational":
+            raise ValueError(
+                "Формат A4 поддерживает только оперативный профиль. "
+                "Для расширенного или полного отчёта используйте A3."
+            )
 
         deterministic = [item for item in series if not _is_ensemble(item)]
         ensembles = [item for item in series if _is_ensemble(item)]
@@ -72,6 +81,96 @@ class ScientificDocumentGenerator(DocumentGenerator):
         document.save(output_path)
         return output_path
 
+    def _add_header(
+        self,
+        document: Document,
+        location: Location,
+        series: list[ForecastSeries],
+        options: DocumentOptions,
+    ) -> None:
+        deterministic_count = sum(not _is_ensemble(item) for item in series)
+        ensemble_count = sum(_is_ensemble(item) for item in series)
+
+        paragraph = document.add_paragraph()
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = paragraph.add_run(options.title)
+        run.bold = True
+        run.font.name = "Liberation Sans"
+        run.font.size = Pt(18)
+
+        subtitle = document.add_paragraph()
+        subtitle.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = subtitle.add_run(location.name)
+        run.bold = True
+        run.font.name = "Liberation Sans"
+        run.font.size = Pt(13)
+
+        if options.organisation:
+            organisation = document.add_paragraph(options.organisation)
+            organisation.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+        table = document.add_table(rows=4, cols=4)
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        table.style = "Table Grid"
+        set_table_fixed_layout(table)
+        values = [
+            (
+                "Координаты",
+                f"{location.latitude:.5f}, {location.longitude:.5f}",
+            ),
+            (
+                "Высота",
+                f"{location.elevation_m:.0f} м"
+                if location.elevation_m is not None
+                else "не задана",
+            ),
+            (
+                "Часовой пояс",
+                f"{location.timezone} — "
+                f"{_timezone_source_text(location.timezone_source)}",
+            ),
+            (
+                "Сформировано",
+                datetime.now(UTC).strftime("%d.%m.%Y %H:%M UTC"),
+            ),
+            ("Детерминированных моделей", str(deterministic_count)),
+            ("Ансамблевых систем", str(ensemble_count)),
+            (
+                "Источники",
+                ", ".join(item.source.source_id for item in series),
+            ),
+            (
+                "Документ",
+                f"{options.page_size}; профиль {options.parameter_profile}",
+            ),
+        ]
+        for index, (label, value) in enumerate(values):
+            row = index // 2
+            column = (index % 2) * 2
+            set_cell_text(
+                table.cell(row, column),
+                label,
+                bold=True,
+                align=WD_ALIGN_PARAGRAPH.LEFT,
+            )
+            set_cell_shading(table.cell(row, column), MID_BLUE)
+            set_cell_text(
+                table.cell(row, column + 1),
+                value,
+                align=WD_ALIGN_PARAGRAPH.LEFT,
+            )
+
+        warning = document.add_paragraph()
+        warning.paragraph_format.space_before = Pt(5)
+        warning.paragraph_format.space_after = Pt(7)
+        warning_run = warning.add_run(
+            "Прогноз является расчётной информацией. Для критически важных "
+            "решений учитывайте наблюдения, официальные предупреждения и "
+            "неопределённость моделей."
+        )
+        warning_run.bold = True
+        warning_run.font.size = Pt(8.5)
+
     def _add_deterministic_section(
         self,
         document: Document,
@@ -86,7 +185,9 @@ class ScientificDocumentGenerator(DocumentGenerator):
         metadata.alignment = WD_TABLE_ALIGNMENT.LEFT
         set_table_fixed_layout(metadata)
         cycle = (
-            source.cycle_time_utc.astimezone(UTC).strftime("%d.%m.%Y %H:%M UTC")
+            source.cycle_time_utc.astimezone(UTC).strftime(
+                "%d.%m.%Y %H:%M UTC"
+            )
             if source.cycle_time_utc
             else "не указан поставщиком"
         )
@@ -94,37 +195,84 @@ class ScientificDocumentGenerator(DocumentGenerator):
             ("Источник", source.source_id),
             ("Тип", "детерминированный прогноз"),
             ("Цикл", cycle),
-            ("Получено", source.retrieved_at_utc.astimezone(UTC).strftime("%d.%m.%Y %H:%M UTC")),
-            ("Горизонт", f"{source.horizon_hours} ч" if source.horizon_hours is not None else "—"),
-            ("Шаг", f"{source.native_time_step_hours:g} ч" if source.native_time_step_hours else "переменный"),
-            ("Сетка", " / ".join(filter(None, (source.spatial_resolution, source.grid_type))) or "—"),
+            (
+                "Получено",
+                source.retrieved_at_utc.astimezone(UTC).strftime(
+                    "%d.%m.%Y %H:%M UTC"
+                ),
+            ),
+            (
+                "Горизонт",
+                f"{source.horizon_hours} ч"
+                if source.horizon_hours is not None
+                else "—",
+            ),
+            (
+                "Шаг",
+                f"{source.native_time_step_hours:g} ч"
+                if source.native_time_step_hours
+                else "переменный",
+            ),
+            (
+                "Отсчёт срока",
+                _lead_reference_text(source.lead_time_reference),
+            ),
             ("Продукт", source.product),
         ]
         for index, (label, value) in enumerate(pairs):
             row = index // 2
             column = (index % 2) * 2
-            set_cell_text(metadata.cell(row, column), label, bold=True, align=WD_ALIGN_PARAGRAPH.LEFT)
+            set_cell_text(
+                metadata.cell(row, column),
+                label,
+                bold=True,
+                align=WD_ALIGN_PARAGRAPH.LEFT,
+            )
             set_cell_shading(metadata.cell(row, column), MID_BLUE)
-            set_cell_text(metadata.cell(row, column + 1), value, align=WD_ALIGN_PARAGRAPH.LEFT)
+            set_cell_text(
+                metadata.cell(row, column + 1),
+                value,
+                align=WD_ALIGN_PARAGRAPH.LEFT,
+            )
 
         document.add_heading("1. Наглядный прогноз", level=2)
         self._add_deterministic_summary(document, forecast, options)
         if options.include_detailed_table:
-            document.add_heading("2. Подробный метеорологический отчёт по срокам", level=2)
+            document.add_heading(
+                "2. Подробный метеорологический отчёт по срокам",
+                level=2,
+            )
             self._add_deterministic_details(document, forecast, options)
         self._add_source_notes(document, forecast)
 
-    def _add_deterministic_summary(self, document, forecast, options) -> None:
+    def _add_deterministic_summary(
+        self,
+        document: Document,
+        forecast: ForecastSeries,
+        options: DocumentOptions,
+    ) -> None:
         headers = (
-            "Дата и время", "Погода", "Температура", "Ощущается", "Осадки",
-            "Ветер", "Порывы", "Давление", "Облачность",
+            "Дата и время",
+            "Погода",
+            "Температура",
+            "Ощущается",
+            "Осадки",
+            "Ветер",
+            "Порывы",
+            "Давление",
+            "Облачность",
         )
         widths = (30, 34, 20, 20, 24, 36, 22, 24, 24)
         table = document.add_table(rows=1, cols=len(headers))
         table.style = "Table Grid"
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
         set_table_fixed_layout(table)
-        for cell, text, width in zip(table.rows[0].cells, headers, widths, strict=True):
+        for cell, text, width in zip(
+            table.rows[0].cells,
+            headers,
+            widths,
+            strict=True,
+        ):
             set_cell_text(cell, text, size=8, bold=True)
             set_cell_shading(cell, DARK_BLUE)
             self._set_text_color(cell, WHITE)
@@ -143,25 +291,79 @@ class ScientificDocumentGenerator(DocumentGenerator):
                 set_cell_shading(cell, fill)
                 cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
             presentation = weather_presentation(point)
-            set_cell_text(row.cells[0], point.valid_time_local.strftime("%d.%m.%Y\n%H:%M"), size=7.5)
-            self._set_icon_cell(row.cells[1], presentation.icon_key, presentation.description)
-            set_cell_text(row.cells[2], self._value(point, "temperature_2m", with_unit=True), size=8, bold=True)
-            set_cell_text(row.cells[3], self._value(point, "apparent_temperature", with_unit=True), size=8)
-            set_cell_text(row.cells[4], self._value(point, "precipitation", with_unit=True), size=8)
+            set_cell_text(
+                row.cells[0],
+                point.valid_time_local.strftime("%d.%m.%Y\n%H:%M"),
+                size=7.5,
+            )
+            self._set_icon_cell(
+                row.cells[1],
+                presentation.icon_key,
+                presentation.description,
+            )
+            set_cell_text(
+                row.cells[2],
+                self._value(point, "temperature_2m", with_unit=True),
+                size=8,
+                bold=True,
+            )
+            set_cell_text(
+                row.cells[3],
+                self._value(point, "apparent_temperature", with_unit=True),
+                size=8,
+            )
+            set_cell_text(
+                row.cells[4],
+                self._value(point, "precipitation", with_unit=True),
+                size=8,
+            )
             set_cell_text(row.cells[5], self._wind_text(point), size=7.5)
-            set_cell_text(row.cells[6], self._value(point, "wind_gusts_10m", with_unit=True), size=8)
-            set_cell_text(row.cells[7], self._value(point, "pressure_msl", with_unit=True), size=8)
-            set_cell_text(row.cells[8], self._value(point, "cloud_cover", with_unit=True), size=8)
+            set_cell_text(
+                row.cells[6],
+                self._value(point, "wind_gusts_10m", with_unit=True),
+                size=8,
+            )
+            set_cell_text(
+                row.cells[7],
+                self._value(point, "pressure_msl", with_unit=True),
+                size=8,
+            )
+            set_cell_text(
+                row.cells[8],
+                self._value(point, "cloud_cover", with_unit=True),
+                size=8,
+            )
             self._apply_hazard_shading(row.cells, point)
 
-    def _add_deterministic_details(self, document, forecast, options) -> None:
-        include_extra = options.parameter_profile != "operational" and self._has_additional_parameters(forecast)
+    def _add_deterministic_details(
+        self,
+        document: Document,
+        forecast: ForecastSeries,
+        options: DocumentOptions,
+    ) -> None:
+        if options.page_size == "A4":
+            self._add_compact_a4_details(document, forecast)
+            return
+
+        include_extra = (
+            options.parameter_profile != "operational"
+            and self._has_additional_parameters(forecast)
+        )
         headers = [
-            "Дата и время", "Срок", "Погода", "T / Td / RH", "Давление",
-            "Ветер / порывы", "Осадки", "Снег", "Облачность / видимость",
-            "Конвекция", "Радиация", "Почва / испарение",
+            "Дата и время",
+            "Срок",
+            "Погода",
+            "T / Td / RH",
+            "Давление",
+            "Ветер / порывы",
+            "Осадки",
+            "Снег",
+            "Облачность / видимость",
+            "Конвекция",
+            "Радиация",
+            "Почва / испарение",
         ]
-        widths = [28, 12, 25, 34, 25, 34, 32, 23, 40, 25, 31, 44]
+        widths = [28, 16, 25, 34, 25, 34, 32, 23, 40, 25, 31, 44]
         if include_extra:
             headers.append("Дополнительные поля")
             widths.append(54)
@@ -169,7 +371,12 @@ class ScientificDocumentGenerator(DocumentGenerator):
         table.style = "Table Grid"
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
         set_table_fixed_layout(table)
-        for cell, text, width in zip(table.rows[0].cells, headers, widths, strict=True):
+        for cell, text, width in zip(
+            table.rows[0].cells,
+            headers,
+            widths,
+            strict=True,
+        ):
             set_cell_text(cell, text, size=6.5, bold=True)
             set_cell_shading(cell, DARK_BLUE)
             self._set_text_color(cell, WHITE)
@@ -190,22 +397,114 @@ class ScientificDocumentGenerator(DocumentGenerator):
             presentation = weather_presentation(point)
             cells = [
                 point.valid_time_local.strftime("%d.%m.%Y\n%H:%M"),
-                f"+{point.lead_hours} ч" if point.lead_hours is not None else "—",
+                _lead_text(forecast, point),
                 presentation.description,
-                f"T {self._value(point, 'temperature_2m')}\nTd {self._value(point, 'dew_point_2m')}\nRH {self._value(point, 'relative_humidity_2m')} %",
+                (
+                    f"T {self._value(point, 'temperature_2m')}\n"
+                    f"Td {self._value(point, 'dew_point_2m')}\n"
+                    f"RH {self._value(point, 'relative_humidity_2m')} %"
+                ),
                 self._pressure_text(point),
-                f"{self._wind_text(point)}\nпорывы {self._value(point, 'wind_gusts_10m', with_unit=True)}",
+                (
+                    f"{self._wind_text(point)}\n"
+                    "порывы "
+                    f"{self._value(point, 'wind_gusts_10m', with_unit=True)}"
+                ),
                 self._precipitation_text(point),
                 self._snow_text(point),
-                f"{self._cloud_text(point)}\nвид {self._visibility_text(point)}",
+                (
+                    f"{self._cloud_text(point)}\n"
+                    f"вид {self._visibility_text(point)}"
+                ),
                 self._convection_text(point),
                 self._radiation_text(point),
-                f"{self._soil_temperature_text(point)}\n{self._surface_exchange_text(point)}",
+                (
+                    f"{self._soil_temperature_text(point)}\n"
+                    f"{self._surface_exchange_text(point)}"
+                ),
             ]
             if include_extra:
                 cells.append(self._additional_parameters_text(point))
             for cell, text in zip(row.cells, cells, strict=True):
-                set_cell_text(cell, text, size=5.9 if include_extra else 6.2)
+                set_cell_text(
+                    cell,
+                    text,
+                    size=5.9 if include_extra else 6.2,
+                )
+            self._apply_hazard_shading(row.cells, point)
+
+    def _add_compact_a4_details(
+        self,
+        document: Document,
+        forecast: ForecastSeries,
+    ) -> None:
+        headers = (
+            "Дата и время",
+            "Срок",
+            "Погода и T/Td/RH",
+            "Ветер",
+            "Осадки и снег",
+            "Облачность и видимость",
+            "Давление и конвекция",
+        )
+        widths = (30, 20, 47, 42, 41, 50, 47)
+        table = document.add_table(rows=1, cols=len(headers))
+        table.style = "Table Grid"
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        set_table_fixed_layout(table)
+        for cell, text, width in zip(
+            table.rows[0].cells,
+            headers,
+            widths,
+            strict=True,
+        ):
+            set_cell_text(cell, text, size=7, bold=True)
+            set_cell_shading(cell, DARK_BLUE)
+            self._set_text_color(cell, WHITE)
+            set_cell_width(cell, width)
+        set_repeat_header_count(table, 1)
+
+        previous_date = None
+        for point in forecast.points:
+            row = table.add_row()
+            prevent_row_split(row)
+            current_date = point.valid_time_local.date()
+            fill = LIGHT_BLUE if current_date != previous_date else WHITE
+            previous_date = current_date
+            for cell, width in zip(row.cells, widths, strict=True):
+                set_cell_width(cell, width)
+                set_cell_shading(cell, fill)
+                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            presentation = weather_presentation(point)
+            values = (
+                point.valid_time_local.strftime("%d.%m.%Y\n%H:%M"),
+                _lead_text(forecast, point),
+                (
+                    f"{presentation.description}\n"
+                    f"T {self._value(point, 'temperature_2m')} °C; "
+                    f"Td {self._value(point, 'dew_point_2m')} °C; "
+                    f"RH {self._value(point, 'relative_humidity_2m')} %"
+                ),
+                (
+                    f"{self._wind_text(point)}\n"
+                    "порывы "
+                    f"{self._value(point, 'wind_gusts_10m', with_unit=True)}"
+                ),
+                (
+                    f"{self._precipitation_text(point)}\n"
+                    f"{self._snow_text(point)}"
+                ),
+                (
+                    f"{self._cloud_text(point)}\n"
+                    f"вид {self._visibility_text(point)}"
+                ),
+                (
+                    f"{self._pressure_text(point)}\n"
+                    f"{self._convection_text(point)}"
+                ),
+            )
+            for cell, text in zip(row.cells, values, strict=True):
+                set_cell_text(cell, text, size=6.6)
             self._apply_hazard_shading(row.cells, point)
 
     def _add_ensemble_section(
@@ -219,48 +518,103 @@ class ScientificDocumentGenerator(DocumentGenerator):
         intro = document.add_paragraph()
         intro.add_run(
             "Этот раздел не является ещё одним детерминированным сценарием. "
-            "Каждая строка описывает распределение равновероятных членов конкретной "
-            "ансамблевой системы; разные системы не объединяются в общий супер-ансамбль."
+            "Каждая строка описывает распределение равновероятных членов "
+            "конкретной ансамблевой системы; разные системы не объединяются."
         ).bold = True
         explanations = (
-            "Температура и давление: центр — среднее, σ — стандартное отклонение членов относительно среднего.",
-            "Осадки, ветер, порывы и CAPE: центр — медиана q50; q10–q90 — центральные 80 % членов и устойчивы к единичным выбросам.",
-            "P(осадки) — сырая некалиброванная доля M/N членов выше порога. Минимальный шаг вероятности равен 100/N процентных пунктов.",
-            "Неполный набор членов помечается знаком вопроса. Калибровка, Brier Skill Score и CRPSS требуют архива наблюдений и ретропрогнозов и здесь не подменяются приближениями.",
+            (
+                "Температура и давление: центр — среднее, σ — стандартное "
+                "отклонение членов относительно среднего."
+            ),
+            (
+                "Осадки, ветер, порывы и CAPE: центр — медиана q50; "
+                "q10–q90 — центральные 80 % членов."
+            ),
+            (
+                "P(осадки) — сырая некалиброванная доля M/N членов выше "
+                "порога. В каждой ячейке указаны собственные M, N и интервал."
+            ),
+            (
+                "Срок +N ч показывается от цикла только при известном цикле. "
+                "Для Open-Meteo используется подпись «от начала выдачи»."
+            ),
+            (
+                "Неполный набор членов помечается вопросительным знаком. "
+                "Калибровка, Brier Skill Score и CRPSS без архива не создаются."
+            ),
         )
         for text in explanations:
             paragraph = document.add_paragraph()
             paragraph.paragraph_format.space_after = Pt(1)
             paragraph.add_run(f"• {text}").font.size = Pt(8)
 
+        if options.page_size == "A4":
+            self._add_compact_a4_ensemble_table(document, forecasts, options)
+        else:
+            self._add_a3_ensemble_table(document, forecasts, options)
+
+        document.add_paragraph()
+        for forecast in forecasts:
+            source = forecast.source
+            parts = [source.model]
+            if source.ensemble_member_count:
+                parts.append(f"N={source.ensemble_member_count}")
+            if source.ensemble_expected_member_count:
+                parts.append(
+                    f"ожидалось {source.ensemble_expected_member_count}"
+                )
+            parts.append(_lead_reference_text(source.lead_time_reference))
+            if source.attribution:
+                parts.append(source.attribution)
+            paragraph = document.add_paragraph()
+            paragraph.paragraph_format.space_after = Pt(1)
+            paragraph.add_run("• " + "; ".join(parts)).font.size = Pt(7.5)
+
+    def _add_a3_ensemble_table(
+        self,
+        document: Document,
+        forecasts: list[ForecastSeries],
+        options: DocumentOptions,
+    ) -> None:
         headers = (
-            "Дата и время", "Срок", "Ансамбль", "Члены",
-            "T: среднее ± σ; q10–q90", "Осадки: q50; q10–q90",
-            "Сырые вероятности осадков", "Ветер: q50; q10–q90",
-            "Порывы", "Pmsl: среднее ± σ", "CAPE: q50; q10–q90",
+            "Дата и время",
+            "Срок / отсчёт",
+            "Ансамбль",
+            "Члены",
+            "T: среднее ± σ; q10–q90",
+            "Осадки: q50; q10–q90",
+            "Сырые вероятности осадков",
+            "Ветер: q50; q10–q90",
+            "Порывы",
+            "Pmsl: среднее ± σ",
+            "CAPE: q50; q10–q90",
         )
-        widths = (28, 12, 34, 22, 38, 36, 42, 36, 28, 34, 34)
+        widths = (28, 24, 34, 22, 38, 36, 52, 36, 28, 34, 34)
         table = document.add_table(rows=1, cols=len(headers))
         table.style = "Table Grid"
         table.alignment = WD_TABLE_ALIGNMENT.CENTER
         set_table_fixed_layout(table)
-        for cell, text, width in zip(table.rows[0].cells, headers, widths, strict=True):
+        for cell, text, width in zip(
+            table.rows[0].cells,
+            headers,
+            widths,
+            strict=True,
+        ):
             set_cell_text(cell, text, size=6.5, bold=True)
             set_cell_shading(cell, DARK_BLUE)
             self._set_text_color(cell, WHITE)
             set_cell_width(cell, width)
         set_repeat_header_count(table, 1)
 
-        rows: list[tuple[ForecastSeries, ForecastPoint]] = []
-        for forecast in forecasts:
-            for point in _ensemble_points(forecast.points, options):
-                rows.append((forecast, point))
-        rows.sort(key=lambda item: (item[1].valid_time_utc, item[0].source.model))
         previous_time = None
-        for forecast, point in rows:
+        for forecast, point in _ensemble_rows(forecasts, options):
             row = table.add_row()
             prevent_row_split(row)
-            fill = LIGHT_BLUE if point.valid_time_utc != previous_time else WHITE
+            fill = (
+                LIGHT_BLUE
+                if point.valid_time_utc != previous_time
+                else WHITE
+            )
             previous_time = point.valid_time_utc
             for cell, width in zip(row.cells, widths, strict=True):
                 set_cell_width(cell, width)
@@ -268,7 +622,7 @@ class ScientificDocumentGenerator(DocumentGenerator):
                 cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
             values = (
                 point.valid_time_local.strftime("%d.%m.%Y\n%H:%M"),
-                f"+{point.lead_hours} ч" if point.lead_hours is not None else "—",
+                _lead_text(forecast, point),
                 forecast.source.model,
                 _member_text(forecast, point),
                 _mean_spread_range(point, "temperature_2m", "°C"),
@@ -282,26 +636,86 @@ class ScientificDocumentGenerator(DocumentGenerator):
             for cell, text in zip(row.cells, values, strict=True):
                 set_cell_text(cell, text, size=6.0)
 
-        document.add_paragraph()
-        for forecast in forecasts:
-            source = forecast.source
-            parts = [source.model]
-            if source.ensemble_member_count:
-                parts.append(f"N={source.ensemble_member_count}")
-            if source.ensemble_expected_member_count:
-                parts.append(f"ожидалось {source.ensemble_expected_member_count}")
-            if source.attribution:
-                parts.append(source.attribution)
-            paragraph = document.add_paragraph()
-            paragraph.paragraph_format.space_after = Pt(1)
-            paragraph.add_run("• " + "; ".join(parts)).font.size = Pt(7.5)
+    def _add_compact_a4_ensemble_table(
+        self,
+        document: Document,
+        forecasts: list[ForecastSeries],
+        options: DocumentOptions,
+    ) -> None:
+        headers = (
+            "Дата и срок",
+            "Ансамбль / члены",
+            "Температура",
+            "Осадки и вероятность",
+            "Ветер и порывы",
+            "Давление и CAPE",
+        )
+        widths = (42, 42, 43, 64, 53, 53)
+        table = document.add_table(rows=1, cols=len(headers))
+        table.style = "Table Grid"
+        table.alignment = WD_TABLE_ALIGNMENT.CENTER
+        set_table_fixed_layout(table)
+        for cell, text, width in zip(
+            table.rows[0].cells,
+            headers,
+            widths,
+            strict=True,
+        ):
+            set_cell_text(cell, text, size=7, bold=True)
+            set_cell_shading(cell, DARK_BLUE)
+            self._set_text_color(cell, WHITE)
+            set_cell_width(cell, width)
+        set_repeat_header_count(table, 1)
+
+        previous_time = None
+        for forecast, point in _ensemble_rows(forecasts, options):
+            row = table.add_row()
+            prevent_row_split(row)
+            fill = (
+                LIGHT_BLUE
+                if point.valid_time_utc != previous_time
+                else WHITE
+            )
+            previous_time = point.valid_time_utc
+            for cell, width in zip(row.cells, widths, strict=True):
+                set_cell_width(cell, width)
+                set_cell_shading(cell, fill)
+                cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+            values = (
+                (
+                    f"{point.valid_time_local:%d.%m.%Y %H:%M}\n"
+                    f"{_lead_text(forecast, point)}"
+                ),
+                f"{forecast.source.model}\n{_member_text(forecast, point)}",
+                _mean_spread_range(point, "temperature_2m", "°C"),
+                (
+                    f"{_median_range(point, 'precipitation', 'мм')}\n"
+                    f"{_probabilities_text(point)}"
+                ),
+                (
+                    f"{_median_range(point, 'wind_speed_10m', 'м/с')}\n"
+                    f"{_gust_text(point)}"
+                ),
+                (
+                    f"{_mean_spread_range(point, 'pressure_msl', 'гПа')}\n"
+                    f"CAPE {_median_range(point, 'cape', 'Дж/кг')}"
+                ),
+            )
+            for cell, text in zip(row.cells, values, strict=True):
+                set_cell_text(cell, text, size=6.4)
 
     @staticmethod
-    def _add_source_notes(document: Document, forecast: ForecastSeries) -> None:
+    def _add_source_notes(
+        document: Document,
+        forecast: ForecastSeries,
+    ) -> None:
         notes = list(forecast.warnings)
         source = forecast.source
         if source.grid_distance_km is not None:
-            notes.append(f"Расстояние до ближайшего модельного узла: {source.grid_distance_km:.1f} км.")
+            notes.append(
+                "Расстояние до ближайшего модельного узла: "
+                f"{source.grid_distance_km:.1f} км."
+            )
         if source.attribution:
             notes.append(f"Атрибуция: {source.attribution}.")
         if source.licence:
@@ -317,11 +731,17 @@ def _is_ensemble(forecast: ForecastSeries) -> bool:
         forecast.source.source_kind == SourceKind.ENSEMBLE
         or forecast.source.ensemble_member_count is not None
         or "ensemble" in forecast.source.source_id.lower()
-        or any(token in forecast.source.source_id.lower() for token in ("gefs", "geps", "eps"))
+        or any(
+            token in forecast.source.source_id.lower()
+            for token in ("gefs", "geps", "eps")
+        )
     )
 
 
-def _ensemble_points(points: list[ForecastPoint], options: DocumentOptions) -> list[ForecastPoint]:
+def _ensemble_points(
+    points: list[ForecastPoint],
+    options: DocumentOptions,
+) -> list[ForecastPoint]:
     selected: list[ForecastPoint] = []
     for index, point in enumerate(points):
         lead = point.lead_hours
@@ -330,9 +750,59 @@ def _ensemble_points(points: list[ForecastPoint], options: DocumentOptions) -> l
             if lead is None or lead <= options.ensemble_switch_hour
             else options.ensemble_extended_interval_hours
         )
-        if index == 0 or index == len(points) - 1 or lead is None or lead % interval == 0:
+        if (
+            index == 0
+            or index == len(points) - 1
+            or lead is None
+            or lead % interval == 0
+        ):
             selected.append(point)
     return selected
+
+
+def _ensemble_rows(
+    forecasts: list[ForecastSeries],
+    options: DocumentOptions,
+) -> list[tuple[ForecastSeries, ForecastPoint]]:
+    rows: list[tuple[ForecastSeries, ForecastPoint]] = []
+    for forecast in forecasts:
+        for point in _ensemble_points(forecast.points, options):
+            rows.append((forecast, point))
+    rows.sort(
+        key=lambda item: (
+            item[1].valid_time_utc,
+            item[0].source.model,
+        )
+    )
+    return rows
+
+
+def _lead_text(forecast: ForecastSeries, point: ForecastPoint) -> str:
+    if point.lead_hours is None:
+        return "—"
+    reference = forecast.source.lead_time_reference
+    if reference == LeadTimeReference.CYCLE:
+        return f"+{point.lead_hours} ч\nот цикла"
+    if reference == LeadTimeReference.RESPONSE_START:
+        return f"+{point.lead_hours} ч\nот начала выдачи"
+    return f"+{point.lead_hours} ч\nточка отсчёта неизвестна"
+
+
+def _lead_reference_text(reference: LeadTimeReference) -> str:
+    return {
+        LeadTimeReference.CYCLE: "от времени цикла модели",
+        LeadTimeReference.RESPONSE_START: "от первого срока полученной выдачи",
+        LeadTimeReference.UNKNOWN: "точка отсчёта неизвестна",
+    }[reference]
+
+
+def _timezone_source_text(source: TimezoneSource) -> str:
+    return {
+        TimezoneSource.EXPLICIT: "задан оператором",
+        TimezoneSource.COORDINATES: "определён по координатам",
+        TimezoneSource.GEOCODER: "получен от геокодера",
+        TimezoneSource.SYSTEM_DEFAULT: "резервное значение — проверить",
+    }[source]
 
 
 def _number(point: ForecastPoint, code: str) -> float | None:
@@ -354,7 +824,10 @@ def _mean_spread_range(point: ForecastPoint, code: str, unit: str) -> str:
     p90 = _number(point, f"{code}_p90")
     if mean is None:
         return "—"
-    return f"{_format(mean)} ± {_format(spread)} {unit}\n[{_format(p10)}; {_format(p90)}]"
+    return (
+        f"{_format(mean)} ± {_format(spread)} {unit}\n"
+        f"[{_format(p10)}; {_format(p90)}]"
+    )
 
 
 def _median_range(point: ForecastPoint, code: str, unit: str) -> str:
@@ -363,7 +836,10 @@ def _median_range(point: ForecastPoint, code: str, unit: str) -> str:
     p90 = _number(point, f"{code}_p90")
     if median is None:
         return "—"
-    return f"{_format(median)} {unit}\n[{_format(p10)}; {_format(p90)}]"
+    return (
+        f"{_format(median)} {unit}\n"
+        f"[{_format(p10)}; {_format(p90)}]"
+    )
 
 
 def _gust_text(point: ForecastPoint) -> str:
@@ -371,19 +847,21 @@ def _gust_text(point: ForecastPoint) -> str:
     p90 = _number(point, "wind_gusts_10m_p90")
     if median is None and p90 is None:
         return "—"
-    return f"q50 {_format(median)}\nq90 {_format(p90)} м/с"
+    return f"порывы q50 {_format(median)}; q90 {_format(p90)} м/с"
 
 
 def _member_text(forecast: ForecastSeries, point: ForecastPoint) -> str:
     count = _number(point, "ensemble_member_count")
     coverage = _number(point, "ensemble_member_coverage")
-    resolution = _number(point, "ensemble_probability_resolution")
     expected = forecast.source.ensemble_expected_member_count
     count_text = _format(count, 0)
     if expected:
         count_text += f"/{expected}"
     suffix = "?" if coverage is not None and coverage < 99.9 else ""
-    return f"N {count_text}{suffix}\nполнота {_format(coverage, 0)} %\nшаг {_format(resolution, 2)} п.п."
+    return (
+        f"N {count_text}{suffix}\n"
+        f"полнота {_format(coverage, 0)} %"
+    )
 
 
 def _probabilities_text(point: ForecastPoint) -> str:
@@ -397,8 +875,25 @@ def _probabilities_text(point: ForecastPoint) -> str:
             .replace("p", ".")
         )
         try:
-            value = float(measurement.value) if measurement.value is not None else None
+            value = (
+                float(measurement.value)
+                if measurement.value is not None
+                else None
+            )
         except (TypeError, ValueError):
             value = None
-        rows.append(f"≥{threshold} мм: {_format(value, 0)} %")
+        interval = (
+            f" за {measurement.accumulation_hours:g} ч"
+            if measurement.accumulation_hours is not None
+            else " за интервал источника"
+        )
+        fraction = (
+            f" ({measurement.event_count}/{measurement.sample_count})"
+            if measurement.event_count is not None
+            and measurement.sample_count is not None
+            else ""
+        )
+        rows.append(
+            f"≥{threshold} мм{interval}: {_format(value, 0)} %{fraction}"
+        )
     return "\n".join(rows) if rows else "—"
