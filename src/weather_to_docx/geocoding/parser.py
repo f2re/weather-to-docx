@@ -101,7 +101,8 @@ async def resolve_item(
             payload = dict(item)
             payload.setdefault("id", f"input-{ordinal}")
             payload.setdefault("name", payload["id"])
-            payload.setdefault("timezone", default_timezone)
+            if not payload.get("timezone"):
+                payload["timezone"] = default_timezone
             return Location.model_validate(payload)
         query = str(
             item.get("address")
@@ -181,8 +182,7 @@ def _csv_items(text: str) -> list[Any]:
                     or f"Точка {len(normalized) + 1}",
                     "latitude": str(lat).replace(",", "."),
                     "longitude": str(lon).replace(",", "."),
-                    "timezone": _first(lowered, "timezone", "часовой пояс")
-                    or "UTC",
+                    "timezone": _first(lowered, "timezone", "часовой пояс") or "",
                 }
             )
         else:
