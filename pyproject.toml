@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "weather-to-docx"
-version = "0.3.2"
-description = "Формирование компактных DOCX-прогнозов погоды по координатам"
+version = "0.4.0"
+description = "Формирование DOCX-прогнозов и профессиональных метеограмм по координатам"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "f2re" }]
@@ -13,6 +13,8 @@ dependencies = [
   "cryptography>=42,<48",
   "fastapi>=0.115,<1",
   "httpx>=0.27,<1",
+  "matplotlib>=3.8,<4",
+  "numpy>=1.26,<3",
   "pillow>=10,<13",
   "pydantic>=2.8,<3",
   "pydantic-settings>=2.4,<3",
