@@ -8,9 +8,10 @@ from weather_to_docx.settings import Settings
 from weather_to_docx.sources.registry import SourceRegistry
 
 
-def test_operational_profile_contains_only_report_fields() -> None:
+def test_operational_profile_contains_report_and_meteogram_fields() -> None:
     required = {
         "temperature_2m",
+        "dew_point_2m",
         "relative_humidity_2m",
         "precipitation",
         "pressure_msl",
@@ -18,6 +19,9 @@ def test_operational_profile_contains_only_report_fields() -> None:
         "wind_direction_10m",
         "wind_gusts_10m",
         "cloud_cover",
+        "cloud_cover_low",
+        "cloud_cover_mid",
+        "cloud_cover_high",
         "weather_code",
     }
     excluded = {
@@ -35,11 +39,13 @@ def test_operational_profile_contains_only_report_fields() -> None:
     assert not excluded & set(OPERATIONAL_HOURLY_PARAMETERS)
 
 
-def test_ensemble_profile_is_even_smaller() -> None:
+def test_ensemble_profile_contains_probability_meteogram_fields() -> None:
     assert {
         "temperature_2m",
+        "relative_humidity_2m",
         "precipitation",
         "pressure_msl",
+        "cloud_cover",
         "wind_speed_10m",
         "wind_gusts_10m",
         "weather_code",
