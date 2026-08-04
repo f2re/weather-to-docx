@@ -60,13 +60,29 @@ jobs:
           assert len(wheels) == 1, wheels
           with ZipFile(wheels[0]) as archive:
               names = set(archive.namelist())
+              entry_points_name = next(
+                  name for name in names if name.endswith(".dist-info/entry_points.txt")
+              )
+              entry_points = archive.read(entry_points_name).decode("utf-8")
           required = {
               "weather_to_docx/static/index.html",
               "weather_to_docx/static/styles.css",
               "weather_to_docx/static/app.js",
+              "weather_to_docx/ensemble/science.py",
+              "weather_to_docx/document/scientific_generator.py",
+              "weather_to_docx/geocoding/dadata.py",
+              "weather_to_docx/telegram_bot.py",
+              "weather_to_docx/api_entrypoint.py",
+              "weather_to_docx/telegram_entrypoint.py",
           }
           missing = required - names
-          assert not missing, f"Статические файлы не вошли в wheel: {sorted(missing)}"
+          assert not missing, f"Файлы не вошли в wheel: {sorted(missing)}"
+          for command in (
+              "weather-to-docx",
+              "weather-to-docx-api",
+              "weather-to-docx-telegram",
+          ):
+              assert command in entry_points, entry_points
           PY
 
       - name: Сформировать автономный пример
@@ -79,8 +95,16 @@ jobs:
           OUTPUT_DIR: dist/offline
         run: |
           bash scripts/build-offline-bundle.sh
-          compgen -G 'dist/offline/weather-to-docx-offline-*.tar.zst' >/dev/null
-          sha256sum -c dist/offline/*.tar.zst.sha256
+          archive=$(find dist/offline -maxdepth 1 -name 'weather-to-docx-offline-*.tar.zst' -print -quit)
+          test -n "$archive"
+          sha256sum -c "$archive.sha256"
+          tar --zstd -tf "$archive" > dist/offline/contents.txt
+          grep -q '/setup.sh$' dist/offline/contents.txt
+          grep -q '/configure.sh$' dist/offline/contents.txt
+          grep -q '/systemd/weather-to-docx-telegram.service$' dist/offline/contents.txt
+          grep -q '/docs/ENSEMBLES.md$' dist/offline/contents.txt
+          grep -q '/docs/TELEGRAM.md$' dist/offline/contents.txt
+          grep -q '/docs/DADATA.md$' dist/offline/contents.txt
 
       - name: Сохранить DOCX-пример
         if: matrix.python-version == '3.11'
