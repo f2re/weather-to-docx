@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from weather_to_docx.domain.profiles import (
+    COMPACT_ENSEMBLE_HOURLY_PARAMETERS,
+    OPERATIONAL_HOURLY_PARAMETERS,
+)
 from weather_to_docx.settings import Settings
 from weather_to_docx.sources.base import ForecastSource, SourceDescriptor
 from weather_to_docx.sources.demo import DemoSource
@@ -36,13 +40,16 @@ class SourceRegistry:
             OpenMeteoGemGdpsSource,
         )
         for source_type in deterministic_types:
-            self.register(
-                source_type(
-                    timeout_seconds=settings.http_timeout_seconds,
-                    max_retries=settings.http_max_retries,
-                    user_agent=settings.http_user_agent,
-                )
+            source = source_type(
+                timeout_seconds=settings.http_timeout_seconds,
+                max_retries=settings.http_max_retries,
+                user_agent=settings.http_user_agent,
             )
+            # Обычный отчёт не должен запрашивать десятки исследовательских
+            # полей. При явном options["hourly"] адаптер всё равно использует
+            # пользовательский набор и не ограничивает специальный сценарий.
+            source.hourly_parameters = OPERATIONAL_HOURLY_PARAMETERS
+            self.register(source)
 
         ensemble_types = (
             OpenMeteoGefS025Source,
@@ -53,13 +60,13 @@ class SourceRegistry:
             OpenMeteoGemGepsSource,
         )
         for source_type in ensemble_types:
-            self.register(
-                source_type(
-                    timeout_seconds=max(settings.http_timeout_seconds, 90),
-                    max_retries=settings.http_max_retries,
-                    user_agent=settings.http_user_agent,
-                )
+            source = source_type(
+                timeout_seconds=max(settings.http_timeout_seconds, 90),
+                max_retries=settings.http_max_retries,
+                user_agent=settings.http_user_agent,
             )
+            source.hourly_parameters = COMPACT_ENSEMBLE_HOURLY_PARAMETERS
+            self.register(source)
 
         self.register(
             GfsNomadsSource(
@@ -78,7 +85,9 @@ class SourceRegistry:
             return self._sources[source_id]
         except KeyError as exc:
             available = ", ".join(sorted(self._sources))
-            raise KeyError(f"Неизвестный источник {source_id!r}. Доступны: {available}") from exc
+            raise KeyError(
+                f"Неизвестный источник {source_id!r}. Доступны: {available}"
+            ) from exc
 
     def descriptors(self) -> list[SourceDescriptor]:
         return [source.descriptor for source in self._sources.values()]

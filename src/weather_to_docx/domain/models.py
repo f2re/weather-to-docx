@@ -123,7 +123,7 @@ class SourceMetadata(BaseModel):
     licence: str | None = None
     source_reference: str | None = None
     attribution: str | None = None
-    adapter_version: str = "0.3.1"
+    adapter_version: str = "0.3.2"
     exact_cycle_known: bool = True
 
     ensemble_member_count: int | None = Field(default=None, ge=1)
@@ -235,20 +235,20 @@ class DocumentOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str = "Метеорологический прогноз"
-    summary_interval_hours: int = Field(default=3, ge=1, le=24)
-    extended_summary_interval_hours: int = Field(default=6, ge=1, le=24)
-    summary_switch_hour: int = Field(default=120, ge=1, le=1000)
-    ensemble_interval_hours: int = Field(default=6, ge=1, le=24)
-    ensemble_extended_interval_hours: int = Field(default=12, ge=1, le=24)
-    ensemble_switch_hour: int = Field(default=120, ge=1, le=1000)
+    summary_interval_hours: int = Field(default=6, ge=1, le=24)
+    extended_summary_interval_hours: int = Field(default=12, ge=1, le=24)
+    summary_switch_hour: int = Field(default=72, ge=1, le=1000)
+    ensemble_interval_hours: int = Field(default=12, ge=1, le=24)
+    ensemble_extended_interval_hours: int = Field(default=24, ge=1, le=24)
+    ensemble_switch_hour: int = Field(default=72, ge=1, le=1000)
     include_detailed_table: bool = True
-    include_all_parameters: bool = True
+    include_all_parameters: bool = False
     include_ensemble_section: bool = True
     parameter_profile: str = Field(
-        default="all",
+        default="operational",
         pattern=r"^(operational|extended|all)$",
     )
-    page_size: str = Field(default="A3", pattern=r"^(A3|A4)$")
+    page_size: str = Field(default="A4", pattern=r"^(A3|A4)$")
     language: str = Field(default="ru", pattern=r"^ru$")
     organisation: str | None = None
     prepared_by: str | None = None
