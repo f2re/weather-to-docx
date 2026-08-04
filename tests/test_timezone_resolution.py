@@ -49,3 +49,33 @@ def test_timezone_api_and_worker_diagnostics(tmp_path: Path) -> None:
         assert payload["timezonefinder"] is True
         assert payload["worker"]["online"] is False
         assert "queue" in payload
+
+
+def test_file_preview_uses_shared_parser_and_timezones(tmp_path: Path) -> None:
+    settings = Settings(data_dir=tmp_path / "data")
+    csv_text = (
+        "name;latitude;longitude\n"
+        "Хельсинки;60.1699;24.9384\n"
+        "Владивосток;43.1155;131.8855\n"
+        "Повтор;60.1699;24.9384\n"
+    )
+    with TestClient(create_app(settings)) as client:
+        response = client.post(
+            "/api/v1/geocoding/parse-file",
+            json={
+                "filename": "locations.csv",
+                "content": csv_text,
+                "max_locations": 100,
+            },
+        )
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["timezone"] for item in payload["locations"]] == [
+        "Europe/Helsinki",
+        "Asia/Vladivostok",
+    ]
+    assert all(
+        item["timezone_source"] == "coordinates"
+        for item in payload["locations"]
+    )
+    assert any("повтор координат" in warning for warning in payload["warnings"])
