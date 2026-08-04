@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 BUNDLE_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ENV_FILE=/etc/weather-to-docx/weather-to-docx.env
+CONFIGURE_COMMAND=/usr/local/sbin/weather-to-docx-configure
 
 [[ ${EUID:-$(id -u)} -eq 0 ]] || {
   echo "Ошибка: запустите sudo ./setup.sh" >&2
@@ -19,11 +20,12 @@ ENV_FILE=/etc/weather-to-docx/weather-to-docx.env
 "$BUNDLE_DIR/install.sh"
 
 if [[ -x "$BUNDLE_DIR/configure.sh" ]]; then
+  install -m 0750 "$BUNDLE_DIR/configure.sh" "$CONFIGURE_COMMAND"
   if [[ -t 0 ]]; then
-    "$BUNDLE_DIR/configure.sh" --env "$ENV_FILE" --group weatherdoc
+    "$CONFIGURE_COMMAND" --env "$ENV_FILE" --group weatherdoc
   else
     echo "Нет интерактивного терминала: сохранены существующие настройки." >&2
-    echo "Позже выполните: sudo $BUNDLE_DIR/configure.sh" >&2
+    echo "Позже выполните: sudo weather-to-docx-configure" >&2
   fi
 fi
 
@@ -58,6 +60,6 @@ cat <<'EOF'
   http://127.0.0.1:8080/
 
 Изменить настройки:
-  sudo /opt/weather-to-docx/current/share/scripts/configure.sh
+  sudo weather-to-docx-configure
   sudoedit /etc/weather-to-docx/weather-to-docx.env
 EOF
