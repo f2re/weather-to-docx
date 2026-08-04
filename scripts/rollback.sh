@@ -29,11 +29,15 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl daemon-reload
   systemctl restart weather-to-docx-api.service weather-to-docx-worker.service
   telegram_enabled=$(sed -n 's/^WTD_TELEGRAM_ENABLED=//p' "$ENV_FILE" 2>/dev/null | tail -1 | tr -d '"' || true)
-  if [[ ${telegram_enabled,,} == true ]]; then
+  telegram_command="$CURRENT/venv/bin/weather-to-docx-telegram"
+  if [[ ${telegram_enabled,,} == true && -x "$telegram_command" ]]; then
     systemctl enable weather-to-docx-telegram.service >/dev/null 2>&1 || true
     systemctl restart weather-to-docx-telegram.service
   else
     systemctl disable --now weather-to-docx-telegram.service >/dev/null 2>&1 || true
+    if [[ ${telegram_enabled,,} == true && ! -x "$telegram_command" ]]; then
+      echo "Предупреждение: выбранный старый релиз не содержит Telegram-бот; служба отключена." >&2
+    fi
   fi
 fi
 
