@@ -8,8 +8,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from weather_to_docx.domain.models import Location
+from weather_to_docx.domain.models import Location, TimezoneSource
 from weather_to_docx.geocoding.dadata import DadataClient
+from weather_to_docx.geocoding.timezone import resolve_timezone
 
 _COORDINATES = re.compile(
     r"^\s*(?P<lat>[+-]?\d{1,2}(?:[.,]\d+)?)\s*[,;\s]\s*"
@@ -82,6 +83,11 @@ async def resolve_items(
             result.warnings.append(f"Строка {index}: повтор координат пропущен")
             continue
         seen.add(key)
+        if location.timezone_source == TimezoneSource.SYSTEM_DEFAULT:
+            result.warnings.append(
+                f"Строка {index}: часовой пояс {location.timezone} взят из "
+                "системной настройки; проверьте его"
+            )
         result.locations.append(location)
     if not result.locations:
         raise ValueError("Не удалось определить ни одной координаты")
@@ -101,8 +107,20 @@ async def resolve_item(
             payload = dict(item)
             payload.setdefault("id", f"input-{ordinal}")
             payload.setdefault("name", payload["id"])
-            if not payload.get("timezone"):
-                payload["timezone"] = default_timezone
+            latitude = float(str(payload["latitude"]).replace(",", "."))
+            longitude = float(str(payload["longitude"]).replace(",", "."))
+            payload["latitude"] = latitude
+            payload["longitude"] = longitude
+            if payload.get("timezone"):
+                payload.setdefault("timezone_source", TimezoneSource.EXPLICIT)
+            else:
+                timezone, source = resolve_timezone(
+                    latitude,
+                    longitude,
+                    fallback=default_timezone,
+                )
+                payload["timezone"] = timezone
+                payload["timezone_source"] = source
             return Location.model_validate(payload)
         query = str(
             item.get("address")
@@ -115,12 +133,18 @@ async def resolve_item(
     coordinates = parse_coordinates(query)
     if coordinates:
         lat, lon = coordinates
+        timezone, source = resolve_timezone(
+            lat,
+            lon,
+            fallback=default_timezone,
+        )
         return Location(
             id=f"coordinates-{ordinal}",
             name=f"Координаты {lat:.5f}, {lon:.5f}",
             latitude=lat,
             longitude=lon,
-            timezone=default_timezone,
+            timezone=timezone,
+            timezone_source=TimezoneSource(source),
             group="Входной файл",
         )
     if not query:
@@ -130,7 +154,15 @@ async def resolve_item(
     place = await geocoder.resolve_one(query, automatic=automatic)
     if place is None:
         raise ValueError(f"DaData не нашла координаты для «{query}»")
-    return place.to_location(timezone=default_timezone, prefix=f"input{ordinal}")
+    timezone, source = resolve_timezone(
+        place.latitude,
+        place.longitude,
+        fallback=default_timezone,
+    )
+    return place.to_location(
+        timezone=timezone,
+        prefix=f"input{ordinal}",
+    ).model_copy(update={"timezone_source": TimezoneSource(source)})
 
 
 def parse_coordinates(text: str) -> tuple[float, float] | None:
@@ -182,7 +214,13 @@ def _csv_items(text: str) -> list[Any]:
                     or f"Точка {len(normalized) + 1}",
                     "latitude": str(lat).replace(",", "."),
                     "longitude": str(lon).replace(",", "."),
-                    "timezone": _first(lowered, "timezone", "часовой пояс") or "",
+                    "timezone": _first(
+                        lowered,
+                        "timezone",
+                        "часовой пояс",
+                        "часовой_пояс",
+                    )
+                    or "",
                 }
             )
         else:
