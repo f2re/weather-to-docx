@@ -123,7 +123,7 @@ class SourceMetadata(BaseModel):
     licence: str | None = None
     source_reference: str | None = None
     attribution: str | None = None
-    adapter_version: str = "0.3.2"
+    adapter_version: str = "0.4.0"
     exact_cycle_known: bool = True
 
     ensemble_member_count: int | None = Field(default=None, ge=1)
@@ -244,6 +244,9 @@ class DocumentOptions(BaseModel):
     include_detailed_table: bool = True
     include_all_parameters: bool = False
     include_ensemble_section: bool = True
+    include_meteograms: bool = True
+    meteogram_smoothing: str = Field(default="pchip", pattern=r"^(pchip|linear)$")
+    meteogram_dpi: int = Field(default=180, ge=96, le=360)
     parameter_profile: str = Field(
         default="operational",
         pattern=r"^(operational|extended|all)$",
