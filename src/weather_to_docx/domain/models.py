@@ -36,6 +36,14 @@ class TimezoneSource(StrEnum):
     SYSTEM_DEFAULT = "system_default"
 
 
+class LeadTimeReference(StrEnum):
+    """От какой временной точки отсчитывается `lead_hours`."""
+
+    CYCLE = "cycle"
+    RESPONSE_START = "response_start"
+    UNKNOWN = "unknown"
+
+
 class JobStatus(StrEnum):
     QUEUED = "queued"
     RUNNING = "running"
@@ -78,6 +86,19 @@ class ForecastValue(BaseModel):
     note: str | None = None
     source_start_step: int | None = None
     source_end_step: int | None = None
+    sample_count: int | None = Field(default=None, ge=1)
+    event_count: int | None = Field(default=None, ge=0)
+    accumulation_hours: float | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def validate_event_count(self) -> ForecastValue:
+        if (
+            self.sample_count is not None
+            and self.event_count is not None
+            and self.event_count > self.sample_count
+        ):
+            raise ValueError("Число событий не может превышать размер выборки")
+        return self
 
 
 class SourceMetadata(BaseModel):
@@ -92,6 +113,7 @@ class SourceMetadata(BaseModel):
     retrieved_at_utc: datetime
     horizon_hours: int | None = None
     native_time_step_hours: float | None = None
+    lead_time_reference: LeadTimeReference = LeadTimeReference.CYCLE
     grid_type: str | None = None
     spatial_resolution: str | None = None
     grid_latitude: float | None = None
@@ -111,6 +133,18 @@ class SourceMetadata(BaseModel):
     primary_statistic_policy: str | None = None
     quantile_method: str | None = None
     probability_calibration: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def infer_legacy_lead_reference(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "lead_time_reference" not in value:
+            value = dict(value)
+            value["lead_time_reference"] = (
+                LeadTimeReference.CYCLE.value
+                if value.get("exact_cycle_known", True)
+                else LeadTimeReference.RESPONSE_START.value
+            )
+        return value
 
     @field_validator("cycle_time_utc", "retrieved_at_utc")
     @classmethod
@@ -137,6 +171,11 @@ class SourceMetadata(BaseModel):
             raise ValueError(
                 "Число членов и полнота допустимы только для ансамблевого источника"
             )
+        if (
+            self.lead_time_reference == LeadTimeReference.CYCLE
+            and not self.exact_cycle_known
+        ):
+            self.lead_time_reference = LeadTimeReference.RESPONSE_START
         return self
 
 
