@@ -27,11 +27,19 @@ def test_operator_interface_and_static_assets(tmp_path: Path) -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "Weather to DOCX" in response.text
-    assert "Прогностические модели" in response.text
+    assert "Наглядный сводный прогноз на двух страницах A4" in response.text
+    assert "Модели прогноза" in response.text
+    assert "Отдельные повторяющиеся таблицы" in response.text
 
     response = client.get("/static/app.js")
     assert response.status_code == 200
     assert "createJob" in response.text
+
+    response = client.get("/static/compact_report.js")
+    assert response.status_code == 200
+    assert "createCompactJob" in response.text
+    assert 'page_size: "A4"' in response.text
+    assert "include_all_parameters: false" in response.text
 
     response = client.get("/static/styles.css")
     assert response.status_code == 200
@@ -102,5 +110,8 @@ def test_sources_endpoint_exposes_independent_models(tmp_path: Path) -> None:
         "noaa_gfs_0p25",
     }
     assert expected <= set(sources)
-    assert sources["open_meteo_ecmwf_ifs"]["model"] != sources["open_meteo_ecmwf_aifs"]["model"]
+    assert (
+        sources["open_meteo_ecmwf_ifs"]["model"]
+        != sources["open_meteo_ecmwf_aifs"]["model"]
+    )
     assert sources["open_meteo_gefs_0p5"]["horizon_days"] == 35
