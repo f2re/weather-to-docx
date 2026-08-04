@@ -9,7 +9,7 @@ from telegram import Chat
 
 from weather_to_docx.domain.models import Location, SourceKind
 from weather_to_docx.settings import Settings
-from weather_to_docx.telegram_bot import TelegramForecastBot
+from weather_to_docx.telegram_queue_bot import TelegramQueueBot
 
 
 class FakeBot:
@@ -38,37 +38,37 @@ def _settings(tmp_path: Path) -> Settings:
 
 
 def test_telegram_application_has_minimal_handlers(tmp_path: Path) -> None:
-    forecast_bot = TelegramForecastBot(_settings(tmp_path))
+    forecast_bot = TelegramQueueBot(_settings(tmp_path))
     application = forecast_bot.build_application()
     registered = [
         handler
         for handlers in application.handlers.values()
         for handler in handlers
     ]
-    assert len(registered) >= 8
+    assert len(registered) >= 9
     assert application.bot_data["forecast_bot"] is forecast_bot
 
 
 @pytest.mark.asyncio
 async def test_bot_registers_commands_and_command_menu(tmp_path: Path) -> None:
-    forecast_bot = TelegramForecastBot(_settings(tmp_path))
+    forecast_bot = TelegramQueueBot(_settings(tmp_path))
     fake_bot = FakeBot()
     await forecast_bot._post_init(SimpleNamespace(bot=fake_bot))
 
     command_names = [command.command for command in fake_bot.commands]
-    assert command_names == ["forecast", "sources", "settings", "help"]
+    assert command_names == ["forecast", "cancel", "sources", "settings", "help"]
     assert fake_bot.menu_button is not None
 
 
 def test_bot_uses_supported_chat_action_shortcut() -> None:
     assert hasattr(Chat, "send_chat_action")
-    source = inspect.getsource(TelegramForecastBot._generate_and_send)
+    source = inspect.getsource(TelegramQueueBot._enqueue_and_send)
     assert ".send_chat_action(" in source
     assert ".send_action(" not in source
 
 
 def test_bot_request_separates_model_and_ensemble_sources(tmp_path: Path) -> None:
-    forecast_bot = TelegramForecastBot(_settings(tmp_path))
+    forecast_bot = TelegramQueueBot(_settings(tmp_path))
     request = forecast_bot._request(
         [
             Location(
@@ -94,6 +94,26 @@ def test_bot_request_separates_model_and_ensemble_sources(tmp_path: Path) -> Non
     assert ensemble_request.options["precipitation_thresholds_mm"] == [0.1, 1.0, 5.0]
     assert request.document.include_ensemble_section is True
     assert request.document.parameter_profile == "extended"
+
+
+def test_telegram_uses_shared_job_repository(tmp_path: Path) -> None:
+    forecast_bot = TelegramQueueBot(_settings(tmp_path))
+    forecast_bot.repository.touch_worker("test-worker", details={"pid": 1})
+    request = forecast_bot._request(
+        [
+            Location(
+                id="p1",
+                name="Псков",
+                latitude=57.8193,
+                longitude=28.3325,
+                timezone="Europe/Moscow",
+            )
+        ]
+    )
+    job = forecast_bot.repository.create(request)
+    stored = forecast_bot.repository.get(job.id)
+    assert stored.status.value == "queued"
+    assert stored.progress_total == 3
 
 
 def test_telegram_allowlist_parsing(tmp_path: Path) -> None:
