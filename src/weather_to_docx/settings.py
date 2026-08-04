@@ -34,8 +34,13 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = Field(default=60, gt=0, le=600)
     http_max_retries: int = Field(default=3, ge=1, le=10)
     http_user_agent: str = (
-        "weather-to-docx/0.3.0 (+https://github.com/f2re/weather-to-docx)"
+        "weather-to-docx/0.3.1 (+https://github.com/f2re/weather-to-docx)"
     )
+
+    worker_heartbeat_seconds: float = Field(default=5, ge=1, le=60)
+    worker_lease_seconds: int = Field(default=30, ge=10, le=3600)
+    worker_online_max_age_seconds: int = Field(default=20, ge=5, le=600)
+    worker_max_attempts: int = Field(default=3, ge=1, le=20)
 
     dadata_token: str | None = None
     dadata_secret: str | None = None
@@ -49,6 +54,8 @@ class Settings(BaseSettings):
     telegram_max_input_bytes: int = Field(default=20 * 1024 * 1024, ge=1024)
     telegram_max_output_bytes: int = Field(default=50 * 1024 * 1024, ge=1024)
     telegram_concurrency: int = Field(default=2, ge=1, le=20)
+    telegram_job_poll_seconds: float = Field(default=3, ge=1, le=30)
+    telegram_job_timeout_seconds: int = Field(default=1800, ge=30, le=86400)
 
     require_bundle_signature: bool = False
     bundle_public_key: Path | None = None
@@ -102,6 +109,10 @@ class Settings(BaseSettings):
         if self.telegram_enabled and not self.telegram_bot_token:
             raise ValueError(
                 "WTD_TELEGRAM_ENABLED=true требует WTD_TELEGRAM_BOT_TOKEN"
+            )
+        if self.worker_lease_seconds <= self.worker_heartbeat_seconds * 2:
+            raise ValueError(
+                "WTD_WORKER_LEASE_SECONDS должен быть больше двойного интервала heartbeat"
             )
         return self
 
