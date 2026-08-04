@@ -138,6 +138,7 @@ jobs:
             '/setup.sh'
             '/configure.sh'
             '/systemd/weather-to-docx-telegram.service'
+            '/docs/METEOGRAMS.md'
             '/docs/ENSEMBLES.md'
             '/docs/TELEGRAM.md'
             '/docs/DADATA.md'
