@@ -274,7 +274,7 @@ class TelegramForecastBot:
         async with self.semaphore:
             try:
                 request = self._request(parsed.locations)
-                await message.chat.send_action(ChatAction.TYPING)
+                await message.chat.send_chat_action(ChatAction.TYPING)
                 result = await self.service.generate(request)
                 if result.status.value == "failed":
                     raise RuntimeError("Ни один документ не сформирован")
@@ -282,7 +282,7 @@ class TelegramForecastBot:
                     result,
                     len(parsed.locations),
                 )
-                await message.chat.send_action(ChatAction.UPLOAD_DOCUMENT)
+                await message.chat.send_chat_action(ChatAction.UPLOAD_DOCUMENT)
                 if artifact.size_bytes > self.settings.telegram_max_output_bytes:
                     await self._send_documents_separately(message, result)
                 else:
