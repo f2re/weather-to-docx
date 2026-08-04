@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import math
 import statistics
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 # Переменные с выраженно асимметричными, ограниченными или неотрицательными
 # распределениями получают устойчивый медианный центр. Для температуры и
