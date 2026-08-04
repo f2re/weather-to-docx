@@ -71,6 +71,7 @@ def test_persistent_operator_workflow_after_restarts(tmp_path: Path) -> None:
                     "page_size": "A4",
                     "include_detailed_table": True,
                     "include_all_parameters": False,
+                    "include_meteograms": False,
                     "parameter_profile": "operational",
                 },
             },
@@ -105,7 +106,6 @@ def test_persistent_operator_workflow_after_restarts(tmp_path: Path) -> None:
             assert download.status_code == 200
             assert download.content.startswith(b"PK")
             document = Document(io.BytesIO(download.content))
-            # Без ансамбля компактный документ содержит суточную и срочную таблицы.
             assert len(document.tables) == 2
             text = "\n".join(paragraph.text for paragraph in document.paragraphs)
             expected_name = next(

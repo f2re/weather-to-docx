@@ -27,9 +27,10 @@ def test_operator_interface_and_static_assets(tmp_path: Path) -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "Weather to DOCX" in response.text
-    assert "Наглядный сводный прогноз на двух страницах A4" in response.text
+    assert "Сводный прогноз и профессиональные метеограммы" in response.text
     assert "Модели прогноза" in response.text
-    assert "Отдельные повторяющиеся таблицы" in response.text
+    assert "для каждой пригодной модели" in response.text
+    assert "includeMeteograms" in response.text
 
     response = client.get("/static/app.js")
     assert response.status_code == 200
@@ -40,6 +41,8 @@ def test_operator_interface_and_static_assets(tmp_path: Path) -> None:
     assert "createCompactJob" in response.text
     assert 'page_size: "A4"' in response.text
     assert "include_all_parameters: false" in response.text
+    assert "include_meteograms: includeMeteograms" in response.text
+    assert 'meteogram_smoothing: "pchip"' in response.text
 
     response = client.get("/static/styles.css")
     assert response.status_code == 200

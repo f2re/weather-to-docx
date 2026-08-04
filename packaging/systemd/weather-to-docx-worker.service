@@ -9,6 +9,8 @@ User=weatherdoc
 Group=weatherdoc
 WorkingDirectory=/var/lib/weather-to-docx
 EnvironmentFile=-/etc/weather-to-docx/weather-to-docx.env
+Environment=MPLBACKEND=Agg
+Environment=MPLCONFIGDIR=/var/lib/weather-to-docx/cache/matplotlib
 ExecStart=/opt/weather-to-docx/current/venv/bin/weather-to-docx worker --poll-interval 5
 Restart=on-failure
 RestartSec=5s

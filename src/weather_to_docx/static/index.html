@@ -15,7 +15,7 @@
   <header class="topbar">
     <div>
       <h1>Weather to DOCX</h1>
-      <p>Наглядный сводный прогноз на двух страницах A4</p>
+      <p>Сводный прогноз и профессиональные метеограммы по моделям</p>
     </div>
     <div class="top-actions">
       <span id="healthBadge" class="badge">Проверка…</span>
@@ -97,7 +97,7 @@
         <button id="recommendedSources" class="button secondary" type="button">Рекомендуемый набор</button>
       </div>
       <p class="callout">
-        Модели сравниваются внутри одной сводки. Отдельные повторяющиеся таблицы по каждой модели не создаются. Неполный ряд автоматически исключается, а выбранный ансамбль показывает неопределённость.
+        Первые две страницы содержат общую сводку. Затем для каждой пригодной модели формируется одна страница с компактной таблицей и метеограммой на весь срок. Неполные ряды автоматически исключаются.
       </p>
       <div class="model-columns">
         <div>
@@ -106,7 +106,7 @@
         </div>
         <div>
           <h3>Ансамбль</h3>
-          <p class="muted">Для компактного документа используется одна выбранная система.</p>
+          <p class="muted">Одна выбранная система получает отдельную вероятностную метеограмму.</p>
           <div id="ensembleSources" class="model-list"></div>
         </div>
       </div>
@@ -119,11 +119,12 @@
         <label>Горизонт, суток<input id="forecastDays" type="number" min="1" max="7" value="7"></label>
         <label>Пороги осадков, мм<input id="precipitationThresholds" value="0.1, 1, 5"></label>
         <label class="wide">Заголовок<input id="documentTitle" value="Метеорологический прогноз"></label>
+        <label class="wide checkbox-line"><input id="includeMeteograms" type="checkbox" checked> Добавить метеограммы по каждой модели и ансамблю</label>
       </div>
       <input id="pageSize" type="hidden" value="A4">
       <input id="parameterProfile" type="hidden" value="operational">
       <p class="callout">
-        Формат фиксирован: A4, две страницы. На первой — главное, прогноз по дням и ансамбль. На второй — контрольные сроки через 6 часов в первые трое суток и через 12 часов далее.
+        Метеограмма показывает температуру, влажность, полупрозрачные слои облачности, осадки, ветер, порывы и давление. Для ансамбля добавляется диапазон q10–q90 и вероятности превышения порогов осадков.
       </p>
       <button id="createJob" class="button primary large" type="button">Сформировать прогноз</button>
       <p id="selectionSummary" class="muted">Выберите точки и модели.</p>

@@ -70,6 +70,7 @@ async function createCompactJob() {
     .split(/[;,\s]+/)
     .map(Number)
     .filter((value) => Number.isFinite(value) && value >= 0);
+  const includeMeteograms = document.getElementById("includeMeteograms").checked;
 
   const payload = {
     batch_name: `forecast_${new Date().toISOString().slice(0, 10)}`,
@@ -97,6 +98,9 @@ async function createCompactJob() {
       include_detailed_table: true,
       include_all_parameters: false,
       include_ensemble_section: true,
+      include_meteograms: includeMeteograms,
+      meteogram_smoothing: "pchip",
+      meteogram_dpi: 180,
       parameter_profile: "operational",
       page_size: "A4",
       language: "ru",
@@ -113,7 +117,11 @@ async function createCompactJob() {
       body: JSON.stringify(payload),
     });
     await loadJobs();
-    toast("Создан компактный двухстраничный прогноз.");
+    toast(
+      includeMeteograms
+        ? "Создан прогноз с профессиональными метеограммами."
+        : "Создан компактный прогноз без метеограмм.",
+    );
   } catch (error) {
     reportError(error);
   } finally {
