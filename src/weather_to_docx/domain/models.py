@@ -94,7 +94,6 @@ class SourceMetadata(BaseModel):
     adapter_version: str = "0.3.0"
     exact_cycle_known: bool = True
 
-    # Явные метаданные ансамбля. Они не используются для детерминированных рядов.
     ensemble_member_count: int | None = Field(default=None, ge=1)
     ensemble_expected_member_count: int | None = Field(default=None, ge=1)
     ensemble_member_coverage_percent: float | None = Field(default=None, ge=0, le=100)
@@ -112,16 +111,23 @@ class SourceMetadata(BaseModel):
 
     @model_validator(mode="after")
     def validate_ensemble_metadata(self) -> SourceMetadata:
-        if self.source_kind != SourceKind.ENSEMBLE:
-            ensemble_fields = (
-                self.ensemble_member_count,
-                self.ensemble_expected_member_count,
-                self.ensemble_member_coverage_percent,
+        ensemble_fields = (
+            self.ensemble_member_count,
+            self.ensemble_expected_member_count,
+            self.ensemble_member_coverage_percent,
+        )
+        has_ensemble_metadata = any(value is not None for value in ensemble_fields)
+        if (
+            has_ensemble_metadata
+            and self.source_kind == SourceKind.DETERMINISTIC
+            and _looks_like_legacy_ensemble(self.source_id, self.model, self.product)
+        ):
+            # Пакеты 0.2.x не содержали source_kind, но уже могли содержать N.
+            self.source_kind = SourceKind.ENSEMBLE
+        elif has_ensemble_metadata and self.source_kind != SourceKind.ENSEMBLE:
+            raise ValueError(
+                "Число членов и полнота допустимы только для ансамблевого источника"
             )
-            if any(value is not None for value in ensemble_fields):
-                raise ValueError(
-                    "Число членов и полнота допустимы только для ансамблевого источника"
-                )
         return self
 
 
@@ -250,3 +256,8 @@ class JobRecord(BaseModel):
     error: str | None = None
     created_at_utc: datetime
     updated_at_utc: datetime
+
+
+def _looks_like_legacy_ensemble(source_id: str, model: str, product: str) -> bool:
+    text = f"{source_id} {model} {product}".lower()
+    return any(token in text for token in ("ensemble", "gefs", "geps", "eps", "ансамб"))
