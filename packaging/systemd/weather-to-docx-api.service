@@ -8,8 +8,10 @@ Type=simple
 User=weatherdoc
 Group=weatherdoc
 WorkingDirectory=/var/lib/weather-to-docx
+Environment=WTD_API_HOST=127.0.0.1
+Environment=WTD_API_PORT=8080
 EnvironmentFile=-/etc/weather-to-docx/weather-to-docx.env
-ExecStart=/opt/weather-to-docx/current/venv/bin/weather-to-docx-api
+ExecStart=/opt/weather-to-docx/current/venv/bin/weather-to-docx api --host ${WTD_API_HOST} --port ${WTD_API_PORT}
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=30s
