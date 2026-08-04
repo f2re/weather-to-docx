@@ -153,6 +153,7 @@ class ForecastBatchService:
         batch_dir.mkdir(parents=True, exist_ok=True)
         result = BatchResult(batch_id=batch_id, status=JobStatus.RUNNING)
         generated_documents: list[Path] = []
+        document_manifest: list[dict] = []
         source_manifest: list[dict] = []
 
         for item in collected:
@@ -171,7 +172,17 @@ class ForecastBatchService:
                     output_path=path,
                 )
                 generated_documents.append(path)
-                result.artifacts.append(self._artifact(path, "docx", item.location.id))
+                artifact = self._artifact(path, "docx", item.location.id)
+                result.artifacts.append(artifact)
+                document_manifest.append(
+                    {
+                        "kind": "docx",
+                        "location_id": item.location.id,
+                        "name": path.name,
+                        "sha256": artifact.sha256,
+                        "size_bytes": artifact.size_bytes,
+                    }
+                )
                 for forecast in item.series:
                     source_manifest.append(
                         {
@@ -207,15 +218,22 @@ class ForecastBatchService:
             "document_composition": (
                 "deterministic model sections followed by one scientific ensemble section"
             ),
+            # Поля locations и artifacts сохраняются для совместимости с
+            # пакетами и клиентами версии 0.2.x.
+            "locations": [
+                location.model_dump(mode="json")
+                for location in request.locations
+            ],
+            "artifacts": document_manifest,
             "request": request.model_dump(mode="json"),
             "sources": source_manifest,
             "documents": [
                 {
-                    "name": path.name,
-                    "sha256": sha256_file(path),
-                    "size_bytes": path.stat().st_size,
+                    "name": item["name"],
+                    "sha256": item["sha256"],
+                    "size_bytes": item["size_bytes"],
                 }
-                for path in generated_documents
+                for item in document_manifest
             ],
             "warnings": result.warnings,
             "errors": result.errors,
