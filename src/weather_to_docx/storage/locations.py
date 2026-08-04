@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from weather_to_docx.domain.models import Location
+from weather_to_docx.domain.models import Location, TimezoneSource
 
 
 class LocationRepository:
@@ -113,7 +114,7 @@ class LocationRepository:
             ).fetchone()
         if row is None:
             raise KeyError(f"Координата {location_id!r} не найдена")
-        return Location.model_validate_json(row["location_json"])
+        return self._decode_location(row["location_json"])
 
     def list(
         self,
@@ -145,10 +146,7 @@ class LocationRepository:
                     """,
                     (group, limit),
                 ).fetchall()
-        return [
-            Location.model_validate_json(row["location_json"])
-            for row in rows
-        ]
+        return [self._decode_location(row["location_json"]) for row in rows]
 
     def import_many(
         self,
@@ -215,6 +213,16 @@ class LocationRepository:
                 (location_id,),
             )
         return cursor.rowcount > 0
+
+    @staticmethod
+    def _decode_location(raw: str) -> Location:
+        payload = json.loads(raw)
+        if "timezone_source" not in payload:
+            # Каталог версии 0.3.0 всегда подставлял общий timezone и не мог
+            # доказать, что он верен для конкретной точки. Такие записи нельзя
+            # автоматически считать явно подтверждёнными оператором.
+            payload["timezone_source"] = TimezoneSource.SYSTEM_DEFAULT.value
+        return Location.model_validate(payload)
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.database_path, timeout=30)
