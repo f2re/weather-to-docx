@@ -46,7 +46,8 @@ def run_worker(
             continue
 
         if job.attempt_count > settings.worker_max_attempts:
-            repository.fail(
+            _safe_fail(
+                repository,
                 job.id,
                 (
                     "Превышено допустимое число попыток выполнения: "
@@ -79,11 +80,26 @@ def run_worker(
             if result is None or repository.is_cancelled(job.id):
                 LOGGER.info("Job %s was cancelled", job.id)
             else:
-                repository.complete(job.id, result, worker_id=worker_id)
+                try:
+                    repository.complete(job.id, result, worker_id=worker_id)
+                except (RuntimeError, KeyError) as exc:
+                    # Другой worker уже мог вернуть просроченное задание в
+                    # очередь и получить новую аренду. Старый результат нельзя
+                    # записывать поверх более нового выполнения.
+                    LOGGER.warning(
+                        "Job %s result discarded after lease loss: %s",
+                        job.id,
+                        exc,
+                    )
             processed += 1
         except Exception as exc:
             LOGGER.exception("Job %s failed", job.id)
-            repository.fail(job.id, str(exc), worker_id=worker_id)
+            _safe_fail(
+                repository,
+                job.id,
+                str(exc),
+                worker_id=worker_id,
+            )
             processed += 1
         if once:
             return processed
@@ -130,6 +146,23 @@ async def _run_with_heartbeat(
         with contextlib.suppress(asyncio.CancelledError):
             await task
         raise
+
+
+def _safe_fail(
+    repository: JobRepository,
+    job_id: str,
+    error: str,
+    *,
+    worker_id: str,
+) -> None:
+    try:
+        repository.fail(job_id, error, worker_id=worker_id)
+    except (RuntimeError, KeyError) as exc:
+        LOGGER.warning(
+            "Job %s failure was not persisted after lease loss: %s",
+            job_id,
+            exc,
+        )
 
 
 def _worker_id() -> str:
