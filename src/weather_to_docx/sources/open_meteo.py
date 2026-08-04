@@ -12,6 +12,7 @@ from weather_to_docx.domain.models import (
     ForecastPoint,
     ForecastSeries,
     ForecastValue,
+    LeadTimeReference,
     Location,
     SourceMetadata,
 )
@@ -77,9 +78,13 @@ class OpenMeteoDeterministicSource(ForecastSource):
     model_id: ClassVar[str]
     hourly_parameters: ClassVar[tuple[str, ...]] = OPEN_METEO_CORE_PARAMETERS
     product: ClassVar[str] = "hourly point forecast"
-    grid_type: ClassVar[str] = "regular latitude-longitude; point selection by Open-Meteo"
+    grid_type: ClassVar[str] = (
+        "regular latitude-longitude; point selection by Open-Meteo"
+    )
     spatial_resolution: ClassVar[str | None] = None
-    licence: ClassVar[str] = "Условия Open-Meteo и лицензия исходного поставщика"
+    licence: ClassVar[str] = (
+        "Условия Open-Meteo и лицензия исходного поставщика"
+    )
     attribution: ClassVar[str]
     interpolation_warning: ClassVar[str | None] = (
         "Open-Meteo может приводить нативные сроки модели к почасовой сетке; "
@@ -92,7 +97,7 @@ class OpenMeteoDeterministicSource(ForecastSource):
         *,
         timeout_seconds: float = 60,
         max_retries: int = 3,
-        user_agent: str = "weather-to-docx/0.2.0",
+        user_agent: str = "weather-to-docx/0.3.1",
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.timeout_seconds = timeout_seconds
@@ -108,7 +113,9 @@ class OpenMeteoDeterministicSource(ForecastSource):
     ) -> ForecastSeries:
         options = options or {}
         endpoint = str(options.get("endpoint", self.default_endpoint))
-        requested_parameters = tuple(options.get("hourly", self.hourly_parameters))
+        requested_parameters = tuple(
+            options.get("hourly", self.hourly_parameters)
+        )
         forecast_days = min(forecast_days, self.descriptor.horizon_days)
         model_id = str(options.get("model", self.model_id))
         params: dict[str, Any] = {
@@ -144,15 +151,20 @@ class OpenMeteoDeterministicSource(ForecastSource):
                     last_error = exc
                     if attempt == self.max_retries:
                         raise RuntimeError(
-                            f"{self.descriptor.name} недоступен после {attempt} попыток: {exc}"
+                            f"{self.descriptor.name} недоступен после "
+                            f"{attempt} попыток: {exc}"
                         ) from exc
                     await asyncio.sleep(min(2 ** (attempt - 1), 5))
             if response is None:
-                raise RuntimeError(f"{self.descriptor.name} не вернул ответ: {last_error}")
+                raise RuntimeError(
+                    f"{self.descriptor.name} не вернул ответ: {last_error}"
+                )
             payload = response.json()
             if isinstance(payload, list):
                 if len(payload) != 1:
-                    raise ValueError("Адаптер одной точки получил несколько наборов координат")
+                    raise ValueError(
+                        "Адаптер одной точки получил несколько наборов координат"
+                    )
                 payload = payload[0]
             return self.parse_payload(
                 payload,
@@ -179,7 +191,11 @@ class OpenMeteoDeterministicSource(ForecastSource):
         hourly_units = payload.get("hourly_units") or {}
         times = hourly.get("time") or []
         if not times:
-            reason = payload.get("reason") or payload.get("error") or "отсутствует массив hourly.time"
+            reason = (
+                payload.get("reason")
+                or payload.get("error")
+                or "отсутствует массив hourly.time"
+            )
             raise ValueError(f"Некорректный ответ Open-Meteo: {reason}")
 
         timezone = ZoneInfo(location.timezone)
@@ -190,16 +206,40 @@ class OpenMeteoDeterministicSource(ForecastSource):
 
         for index, valid_utc in enumerate(parsed_times):
             values: dict[str, ForecastValue] = {}
+            interval_hours = _interval_hours(parsed_times, index)
+            lead_hours = round(
+                (valid_utc - first_time).total_seconds() / 3600
+            )
             for parameter, series in hourly.items():
                 if parameter in ignored or not isinstance(series, list):
                     continue
                 raw = series[index] if index < len(series) else None
                 if raw is None:
                     continue
+                interval_parameter = parameter in {
+                    "precipitation",
+                    "rain",
+                    "showers",
+                    "snowfall",
+                    "sunshine_duration",
+                    "evapotranspiration",
+                    "et0_fao_evapotranspiration",
+                }
                 values[parameter] = ForecastValue(
                     value=raw,
                     unit=_normalise_unit(hourly_units.get(parameter)),
                     source_parameter=parameter,
+                    source_start_step=(
+                        max(0, round(lead_hours - interval_hours))
+                        if interval_parameter and interval_hours is not None
+                        else None
+                    ),
+                    source_end_step=(
+                        lead_hours if interval_parameter else None
+                    ),
+                    accumulation_hours=(
+                        interval_hours if interval_parameter else None
+                    ),
                 )
 
             weather_code = _indexed(hourly.get("weather_code"), index)
@@ -208,9 +248,17 @@ class OpenMeteoDeterministicSource(ForecastSource):
                 ForecastPoint(
                     valid_time_utc=valid_utc,
                     valid_time_local=valid_utc.astimezone(timezone),
-                    lead_hours=round((valid_utc - first_time).total_seconds() / 3600),
-                    weather_code=int(weather_code) if weather_code is not None else None,
-                    is_day=bool(is_day_raw) if is_day_raw is not None else None,
+                    lead_hours=lead_hours,
+                    weather_code=(
+                        int(weather_code)
+                        if weather_code is not None
+                        else None
+                    ),
+                    is_day=(
+                        bool(is_day_raw)
+                        if is_day_raw is not None
+                        else None
+                    ),
                     values=values,
                 )
             )
@@ -230,8 +278,15 @@ class OpenMeteoDeterministicSource(ForecastSource):
         actual_endpoint = endpoint or cls.default_endpoint
         actual_model_id = model_id or cls.model_id
         warnings = [
-            "Стандартный ответ Open-Meteo не содержит надёжного времени исходного "
-            f"цикла {cls.descriptor.model}; в документе фиксируется время получения."
+            (
+                "Стандартный ответ Open-Meteo не содержит надёжного времени "
+                f"исходного цикла {cls.descriptor.model}; в документе "
+                "фиксируется время получения."
+            ),
+            (
+                "Значения +N ч в обработанной выдаче отсчитываются от первого "
+                "доступного срока ответа, а не от неизвестного цикла модели."
+            ),
         ]
         if cls.interpolation_warning:
             warnings.append(cls.interpolation_warning)
@@ -247,8 +302,11 @@ class OpenMeteoDeterministicSource(ForecastSource):
                 product=cls.product,
                 cycle_time_utc=None,
                 retrieved_at_utc=retrieved_at_utc,
-                horizon_hours=round((parsed_times[-1] - parsed_times[0]).total_seconds() / 3600),
+                horizon_hours=round(
+                    (parsed_times[-1] - parsed_times[0]).total_seconds() / 3600
+                ),
                 native_time_step_hours=step_hours,
+                lead_time_reference=LeadTimeReference.RESPONSE_START,
                 grid_type=cls.grid_type,
                 spatial_resolution=cls.spatial_resolution,
                 grid_latitude=grid_latitude,
@@ -258,7 +316,7 @@ class OpenMeteoDeterministicSource(ForecastSource):
                 licence=cls.licence,
                 source_reference=actual_endpoint,
                 attribution=cls.attribution,
-                adapter_version="0.2.0",
+                adapter_version="0.3.1",
                 exact_cycle_known=False,
                 upstream_model_id=actual_model_id,
                 delivery_service="Open-Meteo",
@@ -285,7 +343,8 @@ class OpenMeteoGfsSource(OpenMeteoDeterministicSource):
     licence = "Условия Open-Meteo; исходные данные NOAA/NCEP"
     attribution = "Weather data by Open-Meteo; underlying model NOAA GFS"
     strict_source_hint = (
-        "Для строгой фиксации цикла и исходных GRIB2 используйте прямой источник noaa_gfs_0p25."
+        "Для строгой фиксации цикла и исходных GRIB2 используйте прямой "
+        "источник noaa_gfs_0p25."
     )
 
 
@@ -314,7 +373,10 @@ class OpenMeteoEcmwfAifsSource(OpenMeteoDeterministicSource):
         model="ECMWF AIFS 0.25° Single",
         horizon_days=15,
         exact_cycle=False,
-        notes="Глобальная модель машинного обучения ECMWF; не смешивается с IFS.",
+        notes=(
+            "Глобальная модель машинного обучения ECMWF; "
+            "не смешивается с IFS."
+        ),
     )
     default_endpoint = "https://api.open-meteo.com/v1/ecmwf"
     model_id = "ecmwf_aifs025_single"
@@ -322,8 +384,9 @@ class OpenMeteoEcmwfAifsSource(OpenMeteoDeterministicSource):
     licence = "ECMWF Open Data CC BY 4.0; условия Open-Meteo"
     attribution = "ECMWF AIFS Open Data, delivered by Open-Meteo"
     interpolation_warning = (
-        "AIFS имеет более редкие нативные сроки; почасовые строки Open-Meteo являются "
-        "временной интерполяцией и не должны трактоваться как отдельные расчётные сроки модели."
+        "AIFS имеет более редкие нативные сроки; почасовые строки "
+        "Open-Meteo являются временной интерполяцией и не должны "
+        "трактоваться как отдельные расчётные сроки модели."
     )
 
 
@@ -335,11 +398,16 @@ class OpenMeteoDwdIconGlobalSource(OpenMeteoDeterministicSource):
         model="DWD ICON Global",
         horizon_days=8,
         exact_cycle=False,
-        notes="Глобальная ICON задана явно; региональные ICON-EU/ICON-D2 не подмешиваются.",
+        notes=(
+            "Глобальная ICON задана явно; региональные ICON-EU/ICON-D2 "
+            "не подмешиваются."
+        ),
     )
     default_endpoint = "https://api.open-meteo.com/v1/dwd-icon"
     model_id = "dwd_icon_global"
-    spatial_resolution = "около 0.1° / 11 км; выдача точки подготовлена Open-Meteo"
+    spatial_resolution = (
+        "около 0.1° / 11 км; выдача точки подготовлена Open-Meteo"
+    )
     licence = "DWD Open Data; условия Open-Meteo"
     attribution = "DWD ICON Open Data, delivered by Open-Meteo"
 
@@ -356,9 +424,14 @@ class OpenMeteoGemGdpsSource(OpenMeteoDeterministicSource):
     )
     default_endpoint = "https://api.open-meteo.com/v1/gem"
     model_id = "cmc_gem_gdps"
-    spatial_resolution = "0.15° / около 15 км; выдача точки подготовлена Open-Meteo"
+    spatial_resolution = (
+        "0.15° / около 15 км; выдача точки подготовлена Open-Meteo"
+    )
     licence = "ECCC Open Data; условия Open-Meteo"
-    attribution = "Environment and Climate Change Canada GEM/GDPS, delivered by Open-Meteo"
+    attribution = (
+        "Environment and Climate Change Canada GEM/GDPS, "
+        "delivered by Open-Meteo"
+    )
 
 
 def _parse_open_meteo_time(value: str | int | float) -> datetime:
@@ -372,6 +445,16 @@ def _parse_open_meteo_time(value: str | int | float) -> datetime:
 
 def _indexed(value: Any, index: int) -> Any:
     return value[index] if isinstance(value, list) and index < len(value) else None
+
+
+def _interval_hours(values: list[datetime], index: int) -> float | None:
+    if len(values) < 2:
+        return None
+    if index > 0:
+        interval = (values[index] - values[index - 1]).total_seconds() / 3600
+    else:
+        interval = (values[1] - values[0]).total_seconds() / 3600
+    return float(interval) if interval > 0 else None
 
 
 def _median_step_hours(values: list[datetime]) -> float | None:
