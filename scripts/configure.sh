@@ -4,6 +4,7 @@ set -Eeuo pipefail
 ENV_FILE=/etc/weather-to-docx/weather-to-docx.env
 NON_INTERACTIVE=0
 SERVICE_GROUP=weatherdoc
+PYTHON_BIN=${WTD_CONFIGURE_PYTHON:-/opt/weather-to-docx/current/venv/bin/python}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -28,6 +29,14 @@ done
   exit 1
 }
 
+if [[ ! -x "$PYTHON_BIN" ]]; then
+  PYTHON_BIN=$(command -v python3 || true)
+fi
+[[ -x "$PYTHON_BIN" ]] || {
+  echo "Ошибка: не найден Python для безопасной записи EnvironmentFile" >&2
+  exit 1
+}
+
 mkdir -p "$(dirname "$ENV_FILE")"
 touch "$ENV_FILE"
 chmod 0640 "$ENV_FILE"
@@ -43,7 +52,7 @@ get_value() {
 
 set_value() {
   local key=$1 value=$2
-  python3 - "$ENV_FILE" "$key" "$value" <<'PY'
+  "$PYTHON_BIN" - "$ENV_FILE" "$key" "$value" <<'PY'
 import json
 import sys
 from pathlib import Path
