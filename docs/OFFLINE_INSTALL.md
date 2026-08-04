@@ -1,184 +1,200 @@
 # 📦 Автономная установка на Astra Linux
 
-## 1. Принцип
+## 1. Схема развёртывания
 
-Офлайн-комплект собирается на машине с Интернетом, которая совпадает с целевой системой по:
-
-- выпуску Astra Linux;
-- архитектуре (`amd64`, `arm64`);
-- версии `glibc`;
-- версии Python;
-- источникам системных пакетов;
-- режиму защищённости, если он влияет на разрешённые пакеты.
-
-Копировать готовый `venv` с Ubuntu, Debian другой версии или macOS нельзя. Бинарные колёса `cryptography`, `Pillow` и `eccodes` должны собираться или скачиваться в совместимой среде.
-
-## 2. Что содержит комплект
+Приложение и свежие прогнозные данные доставляются раздельно:
 
 ```text
-weather-to-docx-offline-<version>-<target>/
+машина сборки с Интернетом
+        │
+        ├── офлайн-комплект приложения
+        │
+        └── подписанные пакеты свежих прогнозов
+                    │
+                    ▼
+              Astra Linux
+```
+
+Офлайн-комплект необходимо собирать в среде, совместимой с целевой системой по:
+
+- выпуску Astra Linux;
+- архитектуре;
+- версии `glibc`;
+- версии Python;
+- разрешённым системным репозиториям;
+- режиму защищённости.
+
+Копирование `venv` с Ubuntu, macOS или другой версии Debian не поддерживается.
+
+## 2. Состав комплекта
+
+```text
+weather-to-docx-offline-0.3.0-astra17-amd64/
 ├── VERSION
 ├── build-info.json
 ├── README.md
 ├── SHA256SUMS
-├── SHA256SUMS.sig              # при включённой подписи GPG
-├── wheelhouse/                 # приложение и Python-зависимости
-├── apt-repository/             # необязательный локальный APT-репозиторий
-├── runtime/                    # необязательный частный Python runtime
+├── SHA256SUMS.sig
+├── wheelhouse/
+├── apt-repository/
+├── runtime/
 ├── config/
 ├── examples/
 ├── docs/
 ├── systemd/
+│   ├── weather-to-docx-api.service
+│   ├── weather-to-docx-worker.service
+│   └── weather-to-docx-telegram.service
+├── setup.sh
 ├── install.sh
+├── configure.sh
 ├── upgrade.sh
 ├── rollback.sh
 ├── doctor.sh
 └── uninstall.sh
 ```
 
-Установочные сценарии не выполняют сетевые `pip install` и не добавляют внешние APT-репозитории.
+`setup.sh` — рекомендуемая точка входа. `install.sh` выполняет только техническую установку и полезен для автоматизированного развёртывания.
 
-## 3. Сборка локального APT-репозитория
+## 3. Подготовка локального APT
 
 На подключённой Astra Linux:
-
-```bash
-sudo bash scripts/build-astra-apt-repository.sh dist/apt-repository
-```
-
-Пакеты задаются переменной `APT_PACKAGES`. Значение по умолчанию:
-
-```text
-ca-certificates zstd fonts-liberation2 libeccodes0 libeccodes-data
-```
-
-Пример с явно выбранным Python из репозитория организации:
 
 ```bash
 sudo APT_PACKAGES='python3.11 python3.11-venv ca-certificates zstd fonts-liberation2 libeccodes0 libeccodes-data' \
   bash scripts/build-astra-apt-repository.sh dist/apt-repository
 ```
 
-Сценарий скачивает `.deb`, формирует `Packages` и `Packages.gz`. Если в разрешённом репозитории Astra нет Python 3.11, используйте утверждённый частный runtime.
+Если утверждённый репозиторий не содержит Python 3.11, используйте одобренный частный runtime через `RUNTIME_DIR`.
 
-## 4. Сборка Python-колёс и архива
-
-```bash
-bash scripts/build-offline-bundle.sh
-```
-
-Основные переменные:
-
-```bash
-TARGET_TAG=astra17-amd64          # имя целевой платформы
-INCLUDE_GRIB=1                    # включить Python-обвязку ecCodes
-APT_REPOSITORY=dist/apt-repository
-RUNTIME_DIR=/opt/python311        # необязательно
-SIGNING_KEY='GPG_KEY_ID'          # необязательно
-OUTPUT_DIR=dist
-```
-
-Полный пример:
+## 4. Сборка полного архива
 
 ```bash
 TARGET_TAG=astra17-amd64 \
 INCLUDE_GRIB=1 \
 APT_REPOSITORY=dist/apt-repository \
 RUNTIME_DIR=/opt/python311 \
-SIGNING_KEY='release@example.org' \
+SIGNING_KEY='ОТПЕЧАТОК_GPG_КЛЮЧА' \
+OUTPUT_DIR=dist \
   bash scripts/build-offline-bundle.sh
 ```
 
-Результат:
+Формируются:
 
 ```text
-dist/weather-to-docx-offline-0.1.0-astra17-amd64.tar.zst
+dist/weather-to-docx-offline-0.3.0-astra17-amd64.tar.zst
+dist/weather-to-docx-offline-0.3.0-astra17-amd64.tar.zst.sha256
+dist/weather-to-docx-offline-0.3.0-astra17-amd64.tar.zst.asc
 ```
+
+Сценарий включает в `wheelhouse` все зависимости, в том числе `python-telegram-bot`. Установка на целевой машине использует `pip --no-index`.
 
 ## 5. Проверка перед переносом
 
 ```bash
 cd dist
-sha256sum weather-to-docx-offline-*.tar.zst
+sha256sum -c weather-to-docx-offline-*.tar.zst.sha256
+
+gpg --verify \
+  weather-to-docx-offline-*.tar.zst.asc \
+  weather-to-docx-offline-*.tar.zst
 ```
 
-При использовании GPG:
+Архив и подпись переносятся разрешённым носителем.
+
+## 6. Установка одной командой
 
 ```bash
-gpg --verify weather-to-docx-offline-*.tar.zst.asc weather-to-docx-offline-*.tar.zst
+tar --zstd -xf weather-to-docx-offline-0.3.0-astra17-amd64.tar.zst
+cd weather-to-docx-offline-0.3.0-astra17-amd64
+sudo ./setup.sh
 ```
 
-Архив и его подпись переносятся в закрытый контур через разрешённый носитель.
+`setup.sh` последовательно:
 
-## 6. Установка в закрытом контуре
+1. запускает проверяемый `install.sh`;
+2. проверяет SHA-256 и подпись комплекта;
+3. проверяет Astra Linux и архитектуру;
+4. устанавливает `.deb` только из вложенного APT;
+5. устанавливает Python-пакеты только из `wheelhouse`;
+6. создаёт системного пользователя `weatherdoc`;
+7. сохраняет существующую базу;
+8. разворачивает новую версию в `/opt/weather-to-docx/releases`;
+9. атомарно переключает ссылку `current`;
+10. запускает автономную диагностику и тестовый DOCX;
+11. открывает мастер настройки;
+12. спрашивает модели, DaData и Telegram;
+13. запускает выбранные systemd-службы.
+
+Для стендовой проверки вне Astra разрешено явно указать:
 
 ```bash
-tar --zstd -xf weather-to-docx-offline-0.1.0-astra17-amd64.tar.zst
-cd weather-to-docx-offline-0.1.0-astra17-amd64
-sudo ./install.sh
+sudo WTD_ALLOW_NON_ASTRA=1 ./setup.sh
 ```
 
-Установщик:
+В рабочем контуре этот флаг использовать не следует.
 
-1. проверяет контрольные суммы содержимого;
-2. проверяет Astra Linux и архитектуру;
-3. при наличии устанавливает `.deb` только из вложенного APT-репозитория;
-4. создаёт пользователя `weatherdoc` без интерактивного входа;
-5. создаёт каталог новой версии;
-6. создаёт изолированный `venv`;
-7. устанавливает Python-пакеты только из `wheelhouse`;
-8. сохраняет базу и пользовательские данные;
-9. выполняет `weather-to-docx init` и диагностику;
-10. атомарно переключает `/opt/weather-to-docx/current`;
-11. устанавливает и перезапускает systemd-службы;
-12. при ошибке возвращает прежнюю версию.
+## 7. Что спрашивает мастер
 
-Для испытаний на Debian-подобной системе, не являющейся Astra, проверку можно явно отключить:
-
-```bash
-sudo WTD_ALLOW_NON_ASTRA=1 ./install.sh
+```text
+Адрес HTTP-интерфейса
+Порт
+Часовой пояс
+Горизонт прогноза
+Набор моделей
+DaData API token
+DaData secret
+Нужно ли включить Telegram
+Telegram bot token
+Разрешённые Telegram user ID
 ```
 
-В производственной установке так делать не следует.
-
-## 7. Конфигурация
-
-Основной файл окружения:
+Секреты вводятся без отображения. Настройки сохраняются с правами `0640`:
 
 ```text
 /etc/weather-to-docx/weather-to-docx.env
 ```
 
-Пример:
+Повторно запустить мастер:
 
 ```bash
-WTD_DATA_DIR=/var/lib/weather-to-docx
-WTD_LOG_LEVEL=INFO
-WTD_HTTP_TIMEOUT_SECONDS=60
-WTD_HTTP_MAX_RETRIES=3
-WTD_REQUIRE_BUNDLE_SIGNATURE=true
-WTD_BUNDLE_PUBLIC_KEY=/etc/weather-to-docx/keys/forecast-bundle-public.pem
+sudo weather-to-docx-configure
+```
+
+Ручное редактирование:
+
+```bash
+sudoedit /etc/weather-to-docx/weather-to-docx.env
 ```
 
 После изменения:
 
 ```bash
 sudo systemctl restart weather-to-docx-api weather-to-docx-worker
+sudo systemctl restart weather-to-docx-telegram
 ```
 
-## 8. Проверка системы
+## 8. Службы
 
-```bash
-sudo ./doctor.sh
-sudo systemctl status weather-to-docx-api weather-to-docx-worker
-curl -fsS http://127.0.0.1:8080/health
+```text
+weather-to-docx-api.service
+weather-to-docx-worker.service
+weather-to-docx-telegram.service
 ```
 
-Автономный DOCX:
+API и worker включаются всегда. Telegram включается только при:
+
+```dotenv
+WTD_TELEGRAM_ENABLED="true"
+WTD_TELEGRAM_BOT_TOKEN="token"
+```
+
+Состояние:
 
 ```bash
-sudo -u weatherdoc /opt/weather-to-docx/current/venv/bin/weather-to-docx \
-  sample --output /var/lib/weather-to-docx/documents/sample --hours 24
+systemctl status weather-to-docx-api
+systemctl status weather-to-docx-worker
+systemctl status weather-to-docx-telegram
 ```
 
 Журналы:
@@ -186,9 +202,49 @@ sudo -u weatherdoc /opt/weather-to-docx/current/venv/bin/weather-to-docx \
 ```bash
 journalctl -u weather-to-docx-api -n 200 --no-pager
 journalctl -u weather-to-docx-worker -n 200 --no-pager
+journalctl -u weather-to-docx-telegram -n 200 --no-pager
 ```
 
-## 9. Обновление
+## 9. Диагностика
+
+```bash
+sudo /opt/weather-to-docx/current/venv/bin/weather-to-docx doctor --deep
+curl -fsS http://127.0.0.1:8080/health
+```
+
+Автономный пример:
+
+```bash
+sudo -u weatherdoc \
+  /opt/weather-to-docx/current/venv/bin/weather-to-docx \
+  sample \
+  --output /var/lib/weather-to-docx/documents/sample \
+  --hours 24
+```
+
+## 10. Каталоги
+
+```text
+/opt/weather-to-docx/
+├── releases/
+├── current
+└── previous
+
+/etc/weather-to-docx/
+├── weather-to-docx.env
+└── keys/
+
+/var/lib/weather-to-docx/
+├── database/
+├── cache/
+├── documents/
+├── incoming/
+└── backups/
+```
+
+Данные и настройки не находятся внутри каталога релиза и сохраняются при обновлении.
+
+## 11. Обновление
 
 Распакуйте новый комплект и выполните:
 
@@ -196,56 +252,59 @@ journalctl -u weather-to-docx-worker -n 200 --no-pager
 sudo ./upgrade.sh
 ```
 
-Данные не находятся внутри каталога релиза, поэтому не удаляются:
+После технического обновления мастер обычно не нужен: существующие токены и настройки сохраняются.
 
-```text
-/etc/weather-to-docx/
-/var/lib/weather-to-docx/
-```
-
-Перед переключением создаётся резервная копия SQLite.
-
-## 10. Откат
+Проверка:
 
 ```bash
-sudo /opt/weather-to-docx/current/bin/rollback-release
+readlink -f /opt/weather-to-docx/current
+readlink -f /opt/weather-to-docx/previous
+sudo /opt/weather-to-docx/current/venv/bin/weather-to-docx doctor --deep
 ```
 
-или:
+## 12. Откат
 
 ```bash
 sudo ./rollback.sh
 ```
 
-Откат меняет символические ссылки `current` и `previous` местами и перезапускает службы. База не откатывается автоматически, поскольку обратимость миграции данных должна оцениваться отдельно. Перед обновлением резервная копия находится в:
+или:
+
+```bash
+sudo /opt/weather-to-docx/current/bin/rollback-release
+```
+
+Откат переключает `current` и `previous` и перезапускает API, worker и Telegram. Резервные копии SQLite находятся в:
 
 ```text
 /var/lib/weather-to-docx/backups/
 ```
 
-## 11. Удаление
+## 13. Удаление
 
-Остановить приложение, сохранив данные:
+Удалить приложение, сохранив базу, документы и токены:
 
 ```bash
 sudo ./uninstall.sh
 ```
 
-Полное удаление, включая базу, документы, кэш и настройки:
+Полностью удалить приложение и данные:
 
 ```bash
 sudo ./uninstall.sh --purge-data
 ```
 
-## 12. Полностью изолированные прогнозные данные
+## 14. Полностью изолированные прогнозы
 
-Установка приложения и доставка свежих прогнозов — разные процессы. Если сервер не имеет исходящего доступа, на шлюзе выполняется:
+Сервер без исходящего доступа не может самостоятельно обращаться к NOAA, ECMWF, DWD, ECCC, Open-Meteo, DaData или Telegram.
+
+На шлюзе с Интернетом:
 
 ```bash
 weather-to-docx collect-bundle \
   --config examples/locations.yml \
   --output forecast-bundle.tar.zst \
-  --private-key /secure/forecast-bundle-private.pem
+  --private-key /secure/forecast-private.pem
 ```
 
 В закрытом контуре:
@@ -253,9 +312,19 @@ weather-to-docx collect-bundle \
 ```bash
 weather-to-docx generate-bundle \
   --bundle forecast-bundle.tar.zst \
-  --public-key /etc/weather-to-docx/keys/forecast-bundle-public.pem \
+  --public-key /etc/weather-to-docx/keys/forecast-public.pem \
   --require-signature \
   --output /var/lib/weather-to-docx/documents
 ```
 
-Закрытый сервер проверяет Ed25519-подпись манифеста и SHA-256 каждого нормализованного ряда.
+Проверяются Ed25519-подпись и SHA-256 нормализованных рядов.
+
+## 15. Рекомендации по безопасности
+
+- ограничьте Telegram через `WTD_TELEGRAM_ALLOWED_USER_IDS`;
+- не публикуйте DaData и Telegram token;
+- не передавайте secret в веб-интерфейс;
+- держите API на `127.0.0.1` либо используйте reverse proxy с TLS;
+- подписывайте установочные и прогнозные пакеты;
+- сохраняйте резервные копии `/etc/weather-to-docx` и `/var/lib/weather-to-docx`;
+- проверяйте новый комплект на отдельном стенде Astra Linux.
