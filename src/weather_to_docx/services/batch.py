@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from weather_to_docx.document.render_validation import extract_primary_meteogram
 from weather_to_docx.document.scientific_generator import ScientificDocumentGenerator
 from weather_to_docx.document.verification import inspect_meteogram_docx
 from weather_to_docx.domain.models import (
@@ -230,8 +231,16 @@ class ForecastBatchService:
                     options=request.document,
                     output_path=path,
                 )
-                inspection = inspect_meteogram_docx(path)
+                inspection = inspect_meteogram_docx(
+                    path,
+                    render_check=request.document.include_meteograms,
+                )
                 metadata = inspection.metadata()
+                if inspection.visual_check == "failed":
+                    result.warnings.append(
+                        f"{item.location.name}: визуальная проверка DOCX выявила "
+                        "пустую страницу или содержимое у края листа"
+                    )
                 generated_documents.append(path)
                 artifact = self._artifact(
                     path,
@@ -250,6 +259,27 @@ class ForecastBatchService:
                         "metadata": metadata,
                     }
                 )
+
+                preview = extract_primary_meteogram(path)
+                if preview is not None:
+                    preview_bytes, media_type = preview
+                    extension = ".png" if media_type == "image/png" else ".jpg"
+                    preview_path = batch_dir / (
+                        safe_filename(f"Метеограмма_{item.location.name}") + extension
+                    )
+                    preview_path.write_bytes(preview_bytes)
+                    result.artifacts.append(
+                        self._artifact(
+                            preview_path,
+                            "preview",
+                            item.location.id,
+                            metadata={
+                                "media_type": media_type,
+                                "source_document": path.name,
+                            },
+                        )
+                    )
+
                 for forecast in item.series:
                     source_manifest.append(
                         {
