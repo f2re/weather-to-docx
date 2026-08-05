@@ -26,12 +26,11 @@ from weather_to_docx.settings import Settings
 ACTIVE_GENERATOR_MODULES = {
     "weather_to_docx.document.meteogram_document",
     "weather_to_docx.document.localized_meteogram_document",
+    "weather_to_docx.document.audit_generator",
 }
 
 
 def meteogram_runtime_status() -> dict[str, Any]:
-    """Вернуть сведения именно о загруженном процессе, а не о git-каталоге."""
-
     package_file = Path(__file__).resolve()
     generator_module = ScientificDocumentGenerator.__module__
     matplotlib_available = importlib.util.find_spec("matplotlib") is not None
@@ -45,6 +44,7 @@ def meteogram_runtime_status() -> dict[str, Any]:
         "document_generator": generator_module,
         "meteogram_generator_active": generator_active,
         "meteograms_enabled_by_default": default_enabled,
+        "default_document_mode": DocumentOptions().document_mode,
         "matplotlib_available": matplotlib_available,
         "numpy_available": numpy_available,
         "meteogram_ready": (
@@ -57,8 +57,6 @@ def meteogram_runtime_status() -> dict[str, Any]:
 
 
 def verify_meteogram_generation(settings: Settings | None = None) -> dict[str, Any]:
-    """Сформировать автономный DOCX и проверить встроенный крупный график."""
-
     status = meteogram_runtime_status()
     if not status["meteogram_ready"]:
         return {
@@ -91,6 +89,7 @@ def verify_meteogram_generation(settings: Settings | None = None) -> dict[str, A
             ],
             document=DocumentOptions(
                 title="Проверка генератора метеограмм",
+                document_mode="expert",
                 include_meteograms=True,
             ),
             batch_name="runtime-check",
@@ -112,7 +111,7 @@ def verify_meteogram_generation(settings: Settings | None = None) -> dict[str, A
                 "meteogram_embedded": False,
                 "error": "; ".join(result.errors) or "DOCX не сформирован",
             }
-        inspection = inspect_meteogram_docx(artifact.path)
+        inspection = inspect_meteogram_docx(artifact.path, render_check=True)
         return {
             **status,
             "deep_check": True,
@@ -120,18 +119,24 @@ def verify_meteogram_generation(settings: Settings | None = None) -> dict[str, A
             "media_count": inspection.media_count,
             "large_media_count": inspection.large_media_count,
             "large_media_names": list(inspection.large_media_names),
-            "error": inspection.error,
+            "risk_section": inspection.has_risk_section,
+            "russian_weekdays": inspection.has_russian_weekdays,
+            "visual_check": inspection.visual_check,
+            "rendered_pages": inspection.rendered_page_count,
+            "blank_pages": list(inspection.blank_pages),
+            "edge_touch_pages": list(inspection.edge_touch_pages),
+            "error": inspection.error or inspection.visual_error,
         }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Проверить, какой runtime формирует документы и встраивает ли он графики."
+        description="Проверить фактически загруженный генератор документов."
     )
     parser.add_argument(
         "--deep",
         action="store_true",
-        help="сформировать автономный DOCX и проверить встроенную метеограмму",
+        help="сформировать DOCX и проверить метеограмму, риски и рендер страниц",
     )
     arguments = parser.parse_args()
     result = (
