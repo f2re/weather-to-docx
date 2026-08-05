@@ -163,6 +163,10 @@ class Settings(BaseSettings):
         return bool(self.dadata_token)
 
     @property
+    def geocoder_provider(self) -> str:
+        return "dadata" if self.dadata_configured else "nominatim"
+
+    @property
     def api_exposed_without_authentication(self) -> bool:
         return not is_loopback_host(self.api_host)
 
