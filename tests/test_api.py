@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from weather_to_docx.api.app import create_app
+from weather_to_docx.domain.models import DocumentOptions
 from weather_to_docx.services.worker import run_worker
 from weather_to_docx.settings import Settings
 
@@ -53,3 +55,9 @@ def test_api_queue_and_artifact_download(tmp_path: Path) -> None:
     response = client.get(f"/api/v1/jobs/{job_id}/artifacts/{docx_index}")
     assert response.status_code == 200
     assert response.content.startswith(b"PK")
+
+
+def test_a4_defaults_to_operational_profile_and_rejects_other_profiles() -> None:
+    assert DocumentOptions(page_size="A4").parameter_profile == "operational"
+    with pytest.raises(ValueError, match="A4 поддерживает"):
+        DocumentOptions(page_size="A4", parameter_profile="extended")

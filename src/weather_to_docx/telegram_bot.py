@@ -22,7 +22,7 @@ from weather_to_docx.domain.models import (
     SourceKind,
     SourceRequest,
 )
-from weather_to_docx.geocoding.dadata import DadataClient
+from weather_to_docx.geocoding.factory import create_geocoder
 from weather_to_docx.geocoding.parser import (
     LocationParseResult,
     parse_location_bytes,
@@ -43,16 +43,7 @@ class TelegramForecastBot:
         self.settings = settings
         self.registry = SourceRegistry(settings)
         self.service = ForecastBatchService(settings, self.registry)
-        self.geocoder = (
-            DadataClient(
-                settings.dadata_token,
-                secret=settings.dadata_secret,
-                timeout_seconds=settings.dadata_timeout_seconds,
-                user_agent=settings.http_user_agent,
-            )
-            if settings.dadata_token
-            else None
-        )
+        self.geocoder = create_geocoder(settings)
         self.semaphore = asyncio.Semaphore(settings.telegram_concurrency)
 
     def build_application(self) -> Application:
@@ -155,7 +146,7 @@ class TelegramForecastBot:
         await update.effective_message.reply_text(
             f"Горизонт: {self.settings.default_forecast_days} сут.\n"
             f"Часовой пояс: {self.settings.default_timezone}\n"
-            f"DaData: {'настроена' if self.geocoder else 'не настроена'}\n"
+            f"Геокодер: {self.settings.geocoder_provider}\n"
             f"Максимум точек в файле: {self.settings.telegram_max_locations}\n"
             "Ансамбли выводятся одной отдельной таблицей в конце документа."
         )

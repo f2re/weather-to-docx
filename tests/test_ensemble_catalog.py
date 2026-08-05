@@ -54,6 +54,12 @@ def test_registry_uses_scientific_catalog(tmp_path: Path) -> None:
     assert registry.get("open_meteo_gem_geps").expected_member_count == 21
 
 
+def test_registry_uses_current_open_meteo_model_ids(tmp_path: Path) -> None:
+    registry = SourceRegistry(Settings(data_dir=tmp_path))
+    assert registry.get("open_meteo_dwd_icon_eps").model_id == "icon_global_eps"
+    assert registry.get("open_meteo_gem_geps").model_id == "gem_global_ensemble"
+
+
 @pytest.mark.parametrize(
     ("source_type", "expected"),
     [

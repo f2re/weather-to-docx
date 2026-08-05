@@ -63,6 +63,7 @@ queue.stale_running
 timezonefinder
 eccodes_python
 dadata_configured
+geocoder_provider
 telegram_enabled
 default_sources
 default_forecast_days

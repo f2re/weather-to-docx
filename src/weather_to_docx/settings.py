@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     dadata_secret: str | None = None
     dadata_timeout_seconds: float = Field(default=20, gt=0, le=120)
     dadata_suggestion_count: int = Field(default=5, ge=1, le=20)
+    nominatim_url: str = "https://nominatim.openstreetmap.org"
+    nominatim_timeout_seconds: float = Field(default=20, gt=0, le=120)
 
     telegram_enabled: bool = False
     telegram_bot_token: str | None = None
@@ -159,6 +161,10 @@ class Settings(BaseSettings):
     @property
     def dadata_configured(self) -> bool:
         return bool(self.dadata_token)
+
+    @property
+    def geocoder_provider(self) -> str:
+        return "dadata" if self.dadata_configured else "nominatim"
 
     @property
     def api_exposed_without_authentication(self) -> bool:

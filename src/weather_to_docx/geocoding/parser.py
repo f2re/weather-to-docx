@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from weather_to_docx.domain.models import Location, TimezoneSource
-from weather_to_docx.geocoding.dadata import DadataClient
+from weather_to_docx.geocoding.base import Geocoder
 from weather_to_docx.geocoding.timezone import resolve_timezone
 
 _COORDINATES = re.compile(
@@ -28,7 +28,7 @@ async def parse_location_bytes(
     filename: str,
     content: bytes,
     *,
-    geocoder: DadataClient | None,
+    geocoder: Geocoder | None,
     default_timezone: str,
     max_locations: int,
 ) -> LocationParseResult:
@@ -54,7 +54,7 @@ async def parse_location_bytes(
 async def resolve_items(
     items: list[Any],
     *,
-    geocoder: DadataClient | None,
+    geocoder: Geocoder | None,
     default_timezone: str,
     max_locations: int,
     automatic: bool,
@@ -97,7 +97,7 @@ async def resolve_items(
 async def resolve_item(
     item: Any,
     *,
-    geocoder: DadataClient | None,
+    geocoder: Geocoder | None,
     default_timezone: str,
     automatic: bool,
     ordinal: int = 1,
@@ -150,10 +150,10 @@ async def resolve_item(
     if not query:
         raise ValueError("пустой город или адрес")
     if geocoder is None:
-        raise ValueError("для названий городов требуется настроенный DaData token")
+        raise ValueError("для названий городов требуется настроенный геокодер")
     place = await geocoder.resolve_one(query, automatic=automatic)
     if place is None:
-        raise ValueError(f"DaData не нашла координаты для «{query}»")
+        raise ValueError(f"Геокодер не нашёл координаты для «{query}»")
     timezone, source = resolve_timezone(
         place.latitude,
         place.longitude,

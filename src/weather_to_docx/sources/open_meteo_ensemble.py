@@ -587,7 +587,7 @@ class OpenMeteoDwdIconEpsSource(OpenMeteoEnsembleSource):
         SourceKind.ENSEMBLE,
         notes="Глобальный 40-членный вероятностный ансамбль ICON.",
     )
-    model_id = "dwd_icon_global_eps"
+    model_id = "icon_global_eps"
     expected_member_count = 40
     spatial_resolution = (
         "глобальная сетка ICON EPS; выдача точки подготовлена Open-Meteo"
@@ -607,7 +607,7 @@ class OpenMeteoGemGepsSource(OpenMeteoEnsembleSource):
         SourceKind.ENSEMBLE,
         notes="Канадский глобальный вероятностный ансамбль.",
     )
-    model_id = "cmc_gem_geps"
+    model_id = "gem_global_ensemble"
     spatial_resolution = (
         "глобальная сетка GEPS; выдача точки подготовлена Open-Meteo"
     )
