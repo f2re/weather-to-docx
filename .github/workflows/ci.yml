@@ -45,6 +45,9 @@ jobs:
       - name: Проверить согласованность версии
         run: python scripts/check-version.py
 
+      - name: Проверить контракты разработки и агентов
+        run: python scripts/check-development-contract.py
+
       - name: Статическая проверка Python
         run: ruff check .
 
