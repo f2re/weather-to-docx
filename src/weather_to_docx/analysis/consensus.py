@@ -3,9 +3,9 @@ from __future__ import annotations
 import math
 import statistics
 from collections import Counter
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import Iterable
 
 from weather_to_docx.domain.models import ForecastPoint, ForecastSeries
 
@@ -58,12 +58,7 @@ class RiskSignal:
 
 
 def daily_precipitation_total(points: Iterable[ForecastPoint]) -> float | None:
-    """Суммировать только неперекрывающиеся интервалы накопления.
-
-    Если поставщик передал start/end step, интервалы дедуплицируются и
-    перекрывающиеся значения не складываются повторно. При отсутствии явной
-    семантики используется один результат на срок валидности.
-    """
+    """Суммировать только неперекрывающиеся интервалы накопления."""
 
     intervals: list[tuple[float, float, float]] = []
     fallback: dict[datetime, float] = {}
@@ -96,7 +91,10 @@ def daily_precipitation_total(points: Iterable[ForecastPoint]) -> float | None:
         selected: list[tuple[float, float, float]] = []
         for start, end in sorted(unique, key=lambda item: (item[1], item[0])):
             value = unique[(start, end)]
-            overlaps = any(start < chosen_end and end > chosen_start for chosen_start, chosen_end, _ in selected)
+            overlaps = any(
+                start < chosen_end and end > chosen_start
+                for chosen_start, chosen_end, _ in selected
+            )
             if overlaps:
                 continue
             selected.append((start, end, value))
@@ -308,7 +306,6 @@ def build_risk_signals(
                 )
             )
 
-    # Одиночные сценарии допускаются только для потенциально опасных событий.
     signals = [
         signal
         for signal in signals
