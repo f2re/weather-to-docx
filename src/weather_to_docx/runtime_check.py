@@ -22,6 +22,12 @@ from weather_to_docx.services.batch import ForecastBatchService
 from weather_to_docx.settings import Settings
 
 
+ACTIVE_GENERATOR_MODULES = {
+    "weather_to_docx.document.meteogram_document",
+    "weather_to_docx.document.localized_meteogram_document",
+}
+
+
 def meteogram_runtime_status() -> dict[str, Any]:
     """Вернуть сведения именно о загруженном процессе, а не о git-каталоге."""
 
@@ -29,7 +35,7 @@ def meteogram_runtime_status() -> dict[str, Any]:
     generator_module = ScientificDocumentGenerator.__module__
     matplotlib_available = importlib.util.find_spec("matplotlib") is not None
     numpy_available = importlib.util.find_spec("numpy") is not None
-    generator_active = generator_module.endswith(".meteogram_document")
+    generator_active = generator_module in ACTIVE_GENERATOR_MODULES
     default_enabled = DocumentOptions().include_meteograms
     return {
         "version": __version__,
