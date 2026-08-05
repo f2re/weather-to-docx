@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "weather-to-docx"
-version = "0.4.0"
+version = "0.4.1"
 description = "Формирование DOCX-прогнозов и профессиональных метеограмм по координатам"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -40,6 +40,7 @@ dev = [
 weather-to-docx = "weather_to_docx.cli:app"
 weather-to-docx-api = "weather_to_docx.api_entrypoint:main"
 weather-to-docx-telegram = "weather_to_docx.telegram_entrypoint:main"
+weather-to-docx-verify = "weather_to_docx.runtime_check:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/weather_to_docx"]
