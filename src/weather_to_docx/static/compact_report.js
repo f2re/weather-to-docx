@@ -18,6 +18,9 @@ window.addEventListener("DOMContentLoaded", () => {
     limitEnsembleSelection,
     true,
   );
+
+  renderMeteogramRuntimeStatus();
+  window.setInterval(renderMeteogramRuntimeStatus, 2000);
 });
 
 function limitEnsembleSelection(event) {
@@ -30,10 +33,50 @@ function limitEnsembleSelection(event) {
   }
 }
 
+function renderMeteogramRuntimeStatus() {
+  const diagnostics = typeof state !== "undefined" ? state.diagnostics : null;
+  if (!diagnostics) return;
+  const container = document.getElementById("diagnostics");
+  if (!container) return;
+
+  let row = container.querySelector("[data-meteogram-runtime]");
+  if (!row) {
+    row = document.createElement("div");
+    row.className = "metric";
+    row.dataset.meteogramRuntime = "true";
+    row.innerHTML = "<span>Метеограммы</span><strong></strong>";
+    container.prepend(row);
+  }
+  const ready = diagnostics.meteogram_ready === true;
+  const generator = String(diagnostics.document_generator || "не определён")
+    .split(".")
+    .pop();
+  row.querySelector("strong").textContent = ready
+    ? `готовы · ${diagnostics.version}`
+    : `недоступны · ${generator}`;
+  row.classList.toggle("error", !ready);
+
+  const checkbox = document.getElementById("includeMeteograms");
+  if (!checkbox) return;
+  checkbox.disabled = !ready;
+  checkbox.title = ready
+    ? "Графики будут встроены в документ"
+    : "Сервер запущен из старого runtime. Выполните scripts/update.sh";
+}
+
 async function createCompactJob() {
   if (typeof reliabilityState !== "undefined" && !reliabilityState.workerOnline) {
     reportError(new Error(
       "Обработчик заданий не отвечает. Проверьте службу weather-to-docx-worker.",
+    ));
+    return;
+  }
+
+  const includeMeteograms = document.getElementById("includeMeteograms").checked;
+  if (includeMeteograms && state.diagnostics?.meteogram_ready !== true) {
+    reportError(new Error(
+      "Сервер запущен из старой установки без рабочего генератора графиков. "
+      + "В каталоге проекта выполните ./scripts/update.sh, затем обновите страницу.",
     ));
     return;
   }
@@ -70,7 +113,6 @@ async function createCompactJob() {
     .split(/[;,\s]+/)
     .map(Number)
     .filter((value) => Number.isFinite(value) && value >= 0);
-  const includeMeteograms = document.getElementById("includeMeteograms").checked;
 
   const payload = {
     batch_name: `forecast_${new Date().toISOString().slice(0, 10)}`,
