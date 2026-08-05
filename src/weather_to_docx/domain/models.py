@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from weather_to_docx import __version__
+
 
 class QualityFlag(StrEnum):
     SOURCE = "source"
@@ -123,7 +125,7 @@ class SourceMetadata(BaseModel):
     licence: str | None = None
     source_reference: str | None = None
     attribution: str | None = None
-    adapter_version: str = "0.5.0"
+    adapter_version: str = __version__
     exact_cycle_known: bool = True
 
     ensemble_member_count: int | None = Field(default=None, ge=1)
