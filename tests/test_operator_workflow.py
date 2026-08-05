@@ -68,6 +68,7 @@ def test_persistent_operator_workflow_after_restarts(tmp_path: Path) -> None:
                 ],
                 "document": {
                     "title": "Приёмочный метеорологический прогноз",
+                    "document_mode": "brief",
                     "page_size": "A4",
                     "include_detailed_table": True,
                     "include_all_parameters": False,
@@ -106,16 +107,27 @@ def test_persistent_operator_workflow_after_restarts(tmp_path: Path) -> None:
             assert download.status_code == 200
             assert download.content.startswith(b"PK")
             document = Document(io.BytesIO(download.content))
-            assert len(document.tables) == 2
-            text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+            assert len(document.tables) == 3
+            text = "\n".join(
+                [paragraph.text for paragraph in document.paragraphs]
+                + [
+                    cell.text
+                    for table in document.tables
+                    for row in table.rows
+                    for cell in row.cells
+                ]
+            )
             expected_name = next(
                 location["name"]
                 for location in locations
                 if location["id"] == artifact["location_id"]
             )
             assert expected_name in text
+            assert "Ключевые риски" in text
             assert "Прогноз по дням" in text
             assert "Прогноз по контрольным срокам" in text
+            assert "Согласованность" not in text
+            assert artifact["metadata"]["risk_section"] is True
             assert "Подробный метеорологический отчёт" not in text
 
         manifest_index = next(
@@ -127,6 +139,7 @@ def test_persistent_operator_workflow_after_restarts(tmp_path: Path) -> None:
             f"/api/v1/jobs/{job_id}/artifacts/{manifest_index}"
         )
         manifest = json.loads(manifest_response.content)
+        assert manifest["schema_version"] == 3
         assert manifest["batch_id"] == job_id
         assert len(manifest["locations"]) == 2
         assert len(manifest["artifacts"]) == 2
