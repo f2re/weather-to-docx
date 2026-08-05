@@ -87,6 +87,7 @@ jobs:
               "weather_to_docx/document/scientific_generator.py",
               "weather_to_docx/document/compact_generator.py",
               "weather_to_docx/document/meteogram_document.py",
+              "weather_to_docx/document/verification.py",
               "weather_to_docx/plotting/__init__.py",
               "weather_to_docx/plotting/meteogram.py",
               "weather_to_docx/plotting/smoothing.py",
@@ -95,6 +96,7 @@ jobs:
               "weather_to_docx/geocoding/timezone.py",
               "weather_to_docx/storage/jobs_v2.py",
               "weather_to_docx/telegram_queue_bot.py",
+              "weather_to_docx/runtime_check.py",
               "weather_to_docx/api_entrypoint.py",
               "weather_to_docx/telegram_entrypoint.py",
           }
@@ -104,6 +106,7 @@ jobs:
               "weather-to-docx",
               "weather-to-docx-api",
               "weather-to-docx-telegram",
+              "weather-to-docx-verify",
           ):
               assert command in entry_points, entry_points
           PY
@@ -113,6 +116,12 @@ jobs:
           MPLBACKEND: Agg
           MPLCONFIGDIR: /tmp/weather-to-docx-matplotlib-sample
         run: weather-to-docx sample --output var/ci-sample --hours 24
+
+      - name: Проверить встроенный график загруженного runtime
+        env:
+          MPLBACKEND: Agg
+          MPLCONFIGDIR: /tmp/weather-to-docx-matplotlib-runtime
+        run: weather-to-docx-verify --deep
 
       - name: Собрать автономный комплект без GRIB-дополнения
         if: matrix.python-version == '3.11'
@@ -138,8 +147,8 @@ jobs:
             '/setup.sh'
             '/configure.sh'
             '/systemd/weather-to-docx-telegram.service'
-            '/docs/METEOGRAMS.md'
             '/docs/ENSEMBLES.md'
+            '/docs/METEOGRAMS.md'
             '/docs/TELEGRAM.md'
             '/docs/DADATA.md'
             '/docs/REMEDIATION_PLAN.md'

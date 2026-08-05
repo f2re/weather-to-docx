@@ -20,6 +20,7 @@ from weather_to_docx.domain.models import (
     TimezoneSource,
 )
 from weather_to_docx.geocoding.timezone import resolve_timezone
+from weather_to_docx.runtime_check import meteogram_runtime_status
 from weather_to_docx.settings import Settings, get_settings
 from weather_to_docx.sources.registry import SourceRegistry
 from weather_to_docx.storage.jobs import JobRepository
@@ -71,7 +72,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def operator_interface() -> Response:
         index = static_dir / "index.html"
         if index.is_file():
-            return FileResponse(index)
+            return FileResponse(
+                index,
+                headers={"Cache-Control": "no-store, max-age=0"},
+            )
         return HTMLResponse(
             "<h1>Weather to DOCX</h1><p>Интерфейс не включён в пакет.</p>",
             status_code=503,
@@ -82,10 +86,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         worker = repository.worker_status(
             max_age_seconds=settings.worker_online_max_age_seconds
         )
+        runtime = meteogram_runtime_status()
+        ready = worker["online"] and runtime["meteogram_ready"]
         return {
-            "status": "ok" if worker["online"] else "degraded",
+            "status": "ok" if ready else "degraded",
             "version": __version__,
             "worker_online": worker["online"],
+            "meteogram_ready": runtime["meteogram_ready"],
+            "document_generator": runtime["document_generator"],
         }
 
     @app.get("/api/v1/diagnostics", tags=["system"])
@@ -94,8 +102,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         worker = repository.worker_status(
             max_age_seconds=settings.worker_online_max_age_seconds
         )
+        runtime = meteogram_runtime_status()
         return {
-            "version": __version__,
+            **runtime,
             "data_dir": str(settings.data_dir),
             "database": str(settings.database_path),
             "database_exists": settings.database_path.exists(),
@@ -253,6 +262,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         tags=["jobs"],
     )
     def create_job(request: BatchRequest) -> JobRecord:
+        runtime = meteogram_runtime_status()
+        if request.document.include_meteograms and not runtime["meteogram_ready"]:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Сервер запущен из старого или неполного runtime и не может "
+                    "встроить метеограммы. Выполните scripts/update.sh и проверьте "
+                    "weather-to-docx-verify --deep. "
+                    f"Загруженный генератор: {runtime['document_generator']}; "
+                    f"версия: {runtime['version']}."
+                ),
+            )
         normalized = request.model_copy(
             update={
                 "locations": [

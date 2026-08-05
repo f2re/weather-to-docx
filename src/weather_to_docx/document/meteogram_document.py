@@ -35,6 +35,7 @@ from weather_to_docx.document.styles import (
     set_repeat_header_count,
     set_table_fixed_layout,
 )
+from weather_to_docx.document.verification import require_meteogram_docx
 from weather_to_docx.document.weather_rules import weather_presentation
 from weather_to_docx.domain.models import DocumentOptions, ForecastPoint, ForecastSeries, Location
 from weather_to_docx.plotting.meteogram import MeteogramRenderer
@@ -146,6 +147,7 @@ class ScientificDocumentGenerator(CompactDocumentGenerator):
 
             self._add_footer(document, location)
             document.save(output_path)
+            require_meteogram_docx(output_path)
         return output_path
 
     def _add_model_appendix(
