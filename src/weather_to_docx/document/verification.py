@@ -16,6 +16,10 @@ class MeteogramDocumentInspection:
     large_media_count: int
     has_meteogram_marker: bool
     large_media_names: tuple[str, ...]
+    page_break_count: int
+    structured_page_count: int
+    has_risk_section: bool
+    has_russian_weekdays: bool
     error: str | None = None
 
     @property
@@ -26,31 +30,42 @@ class MeteogramDocumentInspection:
             and self.large_media_count >= 1
         )
 
+    def metadata(self) -> dict[str, object]:
+        return {
+            "structural_check": "passed" if self.error is None else "failed",
+            "meteograms": self.large_media_count,
+            "media_count": self.media_count,
+            "structured_pages": self.structured_page_count,
+            "risk_section": self.has_risk_section,
+            "russian_weekdays": self.has_russian_weekdays,
+            "visual_check": "ci-render-required",
+            "error": self.error,
+        }
+
 
 def inspect_meteogram_docx(
     path: Path,
     *,
     minimum_image_bytes: int = MIN_METEOGRAM_IMAGE_BYTES,
 ) -> MeteogramDocumentInspection:
-    """Проверить, что DOCX действительно содержит встроенную метеограмму.
-
-    Маленькие погодные пиктограммы не считаются графиком. Для подтверждения
-    требуется одновременно найти подпись/alt-текст с корнем ``метеограмм`` и
-    хотя бы одно достаточно крупное изображение в ``word/media``.
-    """
+    """Проверить структуру DOCX без ложного заявления о визуальной приёмке."""
 
     path = Path(path)
+    empty = {
+        "path": path,
+        "media_count": 0,
+        "large_media_count": 0,
+        "has_meteogram_marker": False,
+        "large_media_names": (),
+        "page_break_count": 0,
+        "structured_page_count": 0,
+        "has_risk_section": False,
+        "has_russian_weekdays": False,
+    }
     if minimum_image_bytes < 1:
         raise ValueError("Минимальный размер изображения должен быть положительным")
     if not path.is_file():
-        return MeteogramDocumentInspection(
-            path=path,
-            media_count=0,
-            large_media_count=0,
-            has_meteogram_marker=False,
-            large_media_names=(),
-            error="Файл DOCX не найден",
-        )
+        return MeteogramDocumentInspection(**empty, error="Файл DOCX не найден")
 
     try:
         with ZipFile(path) as archive:
@@ -70,21 +85,25 @@ def inspect_meteogram_docx(
                 document_xml = ""
     except (BadZipFile, OSError) as exc:
         return MeteogramDocumentInspection(
-            path=path,
-            media_count=0,
-            large_media_count=0,
-            has_meteogram_marker=False,
-            large_media_names=(),
+            **empty,
             error=f"DOCX не читается: {exc}",
         )
 
-    marker = "метеограмм" in document_xml.casefold()
+    folded = document_xml.casefold()
+    page_break_count = document_xml.count('w:type="page"')
+    russian_weekdays = any(
+        token in folded for token in ("пн", "вт", "ср", "чт", "пт", "сб", "вс")
+    )
     return MeteogramDocumentInspection(
         path=path,
         media_count=len(media),
         large_media_count=len(large),
-        has_meteogram_marker=marker,
+        has_meteogram_marker="метеограмм" in folded,
         large_media_names=large,
+        page_break_count=page_break_count,
+        structured_page_count=page_break_count + 1,
+        has_risk_section="ключевые риски" in folded,
+        has_russian_weekdays=russian_weekdays,
     )
 
 
