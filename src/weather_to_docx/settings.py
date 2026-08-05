@@ -46,7 +46,7 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = Field(default=60, gt=0, le=600)
     http_max_retries: int = Field(default=3, ge=1, le=10)
     http_user_agent: str = (
-        "weather-to-docx/0.4.1 (+https://github.com/f2re/weather-to-docx)"
+        "weather-to-docx/0.5.0 (+https://github.com/f2re/weather-to-docx)"
     )
 
     worker_heartbeat_seconds: float = Field(default=5, ge=1, le=60)
@@ -161,10 +161,6 @@ class Settings(BaseSettings):
     @property
     def dadata_configured(self) -> bool:
         return bool(self.dadata_token)
-
-    @property
-    def geocoder_provider(self) -> str:
-        return "dadata" if self.dadata_configured else "nominatim"
 
     @property
     def api_exposed_without_authentication(self) -> bool:
