@@ -16,6 +16,7 @@ REQUIRED_FILES = (
     "docs/DEVELOPMENT.md",
     ".github/copilot-instructions.md",
     ".github/pull_request_template.md",
+    ".github/ISSUE_TEMPLATE/development-task.yml",
     "scripts/check-version.py",
     "scripts/check-development-contract.py",
     "tests/test_development_contract.py",
@@ -72,6 +73,14 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "python scripts/check-development-contract.py",
         "Все обязательные jobs имеют статус `success`",
         "повторно проверена актуальная `main`",
+    ),
+    ".github/ISSUE_TEMPLATE/development-task.yml": (
+        "SHA актуальной main",
+        "Текущая версия из pyproject.toml",
+        "Решение по версии",
+        "Критерии приёмки",
+        "Исправленный дефект получит регрессионный тест",
+        "повторной проверки main",
     ),
     "docs/DEVELOPMENT.md": (
         "docs/DEVELOPMENT_CONTRACT.md",
