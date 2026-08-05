@@ -123,7 +123,7 @@ class SourceMetadata(BaseModel):
     licence: str | None = None
     source_reference: str | None = None
     attribution: str | None = None
-    adapter_version: str = "0.4.0"
+    adapter_version: str = "0.5.0"
     exact_cycle_known: bool = True
 
     ensemble_member_count: int | None = Field(default=None, ge=1)
@@ -235,6 +235,7 @@ class DocumentOptions(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     title: str = "Метеорологический прогноз"
+    document_mode: str = Field(default="expert", pattern=r"^(brief|expert|full)$")
     summary_interval_hours: int = Field(default=6, ge=1, le=24)
     extended_summary_interval_hours: int = Field(default=12, ge=1, le=24)
     summary_switch_hour: int = Field(default=72, ge=1, le=1000)
@@ -300,6 +301,7 @@ class BatchArtifact(BaseModel):
     sha256: str
     size_bytes: int
     location_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class BatchResult(BaseModel):
