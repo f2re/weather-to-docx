@@ -11,8 +11,9 @@
 
 Подробности:
 
-- [`CHANGELOG.md`](../CHANGELOG.md);
-- [`METEOGRAMS.md`](METEOGRAMS.md);
-- [`ACCEPTANCE.md`](ACCEPTANCE.md).
+- [`RELEASE_0.5.1.md`](RELEASE_0.5.1.md) — описание текущего выпуска;
+- [`CHANGELOG.md`](../CHANGELOG.md) — полная история изменений;
+- [`METEOGRAMS.md`](METEOGRAMS.md) — устройство и смысловые шкалы графиков;
+- [`ACCEPTANCE.md`](ACCEPTANCE.md) — критерии приёмки.
 
 Файл [`RELEASE_0.3.0.md`](RELEASE_0.3.0.md) сохранён только как архивное описание прежнего выпуска.
