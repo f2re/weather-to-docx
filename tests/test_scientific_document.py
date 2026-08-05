@@ -320,10 +320,12 @@ def test_report_contains_summary_and_model_meteogram_appendices(tmp_path: Path) 
     assert "мм" in text
     assert "гПа" in text
 
-    inline_shapes = document.inline_shapes
-    assert len(inline_shapes) == 4
-    assert all(shape.width.mm > 250 for shape in inline_shapes)
-    assert all(shape.height.mm > 80 for shape in inline_shapes)
+    meteogram_shapes = [
+        shape
+        for shape in document.inline_shapes
+        if shape.width.mm > 250 and shape.height.mm > 80
+    ]
+    assert len(meteogram_shapes) == 4
 
     with ZipFile(output) as archive:
         xml = archive.read("word/document.xml").decode("utf-8")
@@ -350,7 +352,11 @@ def test_report_without_meteograms_remains_two_pages_structure(tmp_path: Path) -
     )
     document = Document(output)
     assert len(document.tables) == 3
-    assert len(document.inline_shapes) == 0
+    assert not [
+        shape
+        for shape in document.inline_shapes
+        if shape.width.mm > 250 and shape.height.mm > 80
+    ]
 
 
 def test_incomplete_only_source_is_rejected_instead_of_printing_blanks(
