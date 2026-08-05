@@ -6,6 +6,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_FILES = (
@@ -75,6 +77,7 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "повторно проверена актуальная `main`",
     ),
     ".github/ISSUE_TEMPLATE/development-task.yml": (
+        "description: Контрактная постановка задачи",
         "SHA актуальной main",
         "Текущая версия из pyproject.toml",
         "Решение по версии",
@@ -100,9 +103,76 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
     ),
 }
 
+ISSUE_FORM_PATH = ".github/ISSUE_TEMPLATE/development-task.yml"
+REQUIRED_ISSUE_FORM_IDS = {
+    "main_sha",
+    "current_version",
+    "version_decision",
+    "problem",
+    "acceptance",
+    "tests",
+    "compatibility",
+    "contract",
+}
+
 
 def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
+
+
+def validate_issue_form(errors: list[str]) -> None:
+    path = ROOT / ISSUE_FORM_PATH
+    if not path.is_file():
+        return
+    try:
+        document = yaml.safe_load(path.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        errors.append(f"{ISSUE_FORM_PATH}: некорректный YAML: {exc}")
+        return
+
+    if not isinstance(document, dict):
+        errors.append(f"{ISSUE_FORM_PATH}: корнем должен быть объект")
+        return
+    if "about" in document:
+        errors.append(
+            f"{ISSUE_FORM_PATH}: issue forms используют description, а не about"
+        )
+    for key in ("name", "description", "title", "body"):
+        if key not in document:
+            errors.append(f"{ISSUE_FORM_PATH}: отсутствует обязательное поле {key}")
+
+    body = document.get("body")
+    if not isinstance(body, list):
+        errors.append(f"{ISSUE_FORM_PATH}: body должен быть списком")
+        return
+    ids = {
+        item.get("id")
+        for item in body
+        if isinstance(item, dict) and item.get("id") is not None
+    }
+    missing = REQUIRED_ISSUE_FORM_IDS - ids
+    if missing:
+        errors.append(
+            f"{ISSUE_FORM_PATH}: отсутствуют обязательные id: {sorted(missing)}"
+        )
+
+    for item in body:
+        if not isinstance(item, dict) or item.get("type") == "markdown":
+            continue
+        item_id = item.get("id", "<без id>")
+        if item.get("type") == "checkboxes":
+            options = item.get("attributes", {}).get("options", [])
+            if not options or any(
+                not isinstance(option, dict) or option.get("required") is not True
+                for option in options
+            ):
+                errors.append(
+                    f"{ISSUE_FORM_PATH}: все checkbox-условия {item_id} должны быть required"
+                )
+        elif item.get("validations", {}).get("required") is not True:
+            errors.append(
+                f"{ISSUE_FORM_PATH}: поле {item_id} должно быть обязательным"
+            )
 
 
 def main() -> int:
@@ -121,6 +191,8 @@ def main() -> int:
         for marker in markers:
             if marker not in content:
                 errors.append(f"{path}: отсутствует обязательный маркер {marker!r}")
+
+    validate_issue_form(errors)
 
     agents = ROOT / "AGENTS.md"
     contract = ROOT / "docs/DEVELOPMENT_CONTRACT.md"
