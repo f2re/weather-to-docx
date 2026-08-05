@@ -1,0 +1,88 @@
+name: Задача разработки
+about: Контрактная постановка задачи для человека или кодового агента
+title: "[Разработка] "
+labels: []
+assignees: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Перед началом исполнитель обязан прочитать `AGENTS.md` и `docs/DEVELOPMENT_CONTRACT.md`. Состояние проекта нельзя определять по памяти или старому PR.
+
+  - type: input
+    id: main_sha
+    attributes:
+      label: SHA актуальной main
+      description: Получите SHA непосредственно перед началом работы.
+      placeholder: 40-символьный SHA
+    validations:
+      required: true
+
+  - type: input
+    id: current_version
+    attributes:
+      label: Текущая версия из pyproject.toml
+      placeholder: Например, 0.5.1
+    validations:
+      required: true
+
+  - type: dropdown
+    id: version_decision
+    attributes:
+      label: Решение по версии
+      options:
+        - Версию не менять
+        - Подготовить новый patch-выпуск
+        - Подготовить новый minor-выпуск
+        - Подготовить новый major-выпуск
+        - Требуется решение владельца проекта
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Проблема и ожидаемое поведение
+      description: Опишите наблюдаемую проблему, а не предполагаемое внутреннее решение.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Критерии приёмки
+      description: Перечислите проверяемые результаты, включая документ, интерфейс, установку или расчёты.
+    validations:
+      required: true
+
+  - type: textarea
+    id: tests
+    attributes:
+      label: Обязательные тесты и артефакты
+      description: Укажите регрессионные тесты, рендер DOCX, wheel/offline bundle или другие проверки.
+    validations:
+      required: true
+
+  - type: textarea
+    id: compatibility
+    attributes:
+      label: Совместимость и данные
+      description: Укажите миграции, сохранность БД/настроек, офлайн-Astra и обратную совместимость.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contract
+    attributes:
+      label: Подтверждение контракта
+      options:
+        - label: Исполнитель начнёт с актуальной main и отдельной ветки.
+          required: true
+        - label: Исправленный дефект получит регрессионный тест.
+          required: true
+        - label: Версия не будет уменьшена или изменена без выбранного решения по выпуску.
+          required: true
+        - label: Файловый маркер, Git-тег и GitHub Release будут проверяться раздельно.
+          required: true
+        - label: Завершение будет заявлено только после полного зелёного CI и повторной проверки main.
+          required: true
