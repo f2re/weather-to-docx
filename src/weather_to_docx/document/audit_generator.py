@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import statistics
 import tempfile
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -7,12 +8,13 @@ from pathlib import Path
 from docx import Document
 from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Mm, Pt
+from docx.shared import Pt
 
 from weather_to_docx.analysis.consensus import (
     RiskSignal,
     build_risk_signals,
     daily_agreement,
+    daily_precipitation_total,
 )
 from weather_to_docx.document.compact_generator import (
     AGREEMENT_HIGH,
@@ -23,7 +25,6 @@ from weather_to_docx.document.compact_generator import (
     MINIMUM_MODEL_COMPLETENESS,
     _configure_compact_document,
     _daily_model_metrics,
-    _daily_precipitation_text,
     _daily_pressure_text,
     _daily_presentation_point,
     _daily_temperature_text,
@@ -40,10 +41,8 @@ from weather_to_docx.document.localized_meteogram_document import (
     ScientificDocumentGenerator as LocalizedMeteogramDocumentGenerator,
 )
 from weather_to_docx.document.styles import (
-    DANGER,
     DARK_BLUE,
     LIGHT_BLUE,
-    WARNING,
     WHITE,
     prevent_row_split,
     set_cell_shading,
@@ -52,6 +51,8 @@ from weather_to_docx.document.styles import (
     set_repeat_header_count,
     set_table_fixed_layout,
 )
+from weather_to_docx.document.verification import require_meteogram_docx
+from weather_to_docx.document.weather_rules import weather_presentation
 from weather_to_docx.domain.models import DocumentOptions, ForecastSeries, Location
 from weather_to_docx.plotting.professional_meteogram import ProfessionalMeteogramRenderer
 from weather_to_docx.utils.files import safe_filename
@@ -110,7 +111,7 @@ class ScientificDocumentGenerator(LocalizedMeteogramDocumentGenerator):
         self._add_risk_cards(document, risks)
         self._add_daily_table_professional(document, selection.usable, report_dates)
 
-        # Короткий прогноз не разрывается искусственно на две полупустые страницы.
+        # Для 1–3 суток сводка и контрольные сроки используют одну страницу.
         if len(report_dates) > 3:
             document.add_page_break()
         self._add_control_times_table(document, selection, report_dates)
@@ -162,6 +163,7 @@ class ScientificDocumentGenerator(LocalizedMeteogramDocumentGenerator):
 
             self._add_footer(document, location)
             document.save(output_path)
+            require_meteogram_docx(output_path)
         return output_path
 
     def _add_risk_cards(
@@ -219,7 +221,7 @@ class ScientificDocumentGenerator(LocalizedMeteogramDocumentGenerator):
                 set_cell_shading(cell, fill)
                 cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
             probability = (
-                f"\nансамбль: {signal.ensemble_probability:.0f} %"
+                f"\nансамбль осадков: {signal.ensemble_probability:.0f} %"
                 if signal.ensemble_probability is not None
                 else ""
             )
@@ -295,15 +297,12 @@ class ScientificDocumentGenerator(LocalizedMeteogramDocumentGenerator):
                 f"{day:%d.%m}\n{_weekday_short(day)}",
                 None,
                 _daily_temperature_text(metrics),
-                _daily_precipitation_text(metrics),
+                _daily_precipitation_text_professional(forecasts, day),
                 _daily_wind_text(metrics),
                 _daily_pressure_text(metrics),
             ]
             set_cell_text(row.cells[0], values[0], size=7.2, bold=True)
-            presentation = __import__(
-                "weather_to_docx.document.weather_rules",
-                fromlist=["weather_presentation"],
-            ).weather_presentation(representative)
+            presentation = weather_presentation(representative)
             self._set_compact_icon_cell(
                 row.cells[1],
                 presentation.icon_key,
@@ -422,9 +421,36 @@ class ScientificDocumentGenerator(LocalizedMeteogramDocumentGenerator):
         state = "свежие данные" if age_hours <= 12 else "данные старше 12 часов"
         paragraph = document.add_paragraph()
         paragraph.paragraph_format.space_after = Pt(2)
-        run = paragraph.add_run(
-            f"Цикл: {cycle} · получено: {retrieved} · {state}"
-        )
+        run = paragraph.add_run(f"Цикл: {cycle} · получено: {retrieved} · {state}")
         run.font.name = "Liberation Sans"
         run.font.size = Pt(7)
         run.font.bold = age_hours > 12
+
+
+def _daily_precipitation_text_professional(
+    forecasts: list[ForecastSeries],
+    day: date,
+) -> str:
+    totals = []
+    for forecast in forecasts:
+        points = [
+            point
+            for point in forecast.points
+            if point.valid_time_local.date() == day
+        ]
+        total = daily_precipitation_total(points)
+        if total is not None:
+            totals.append(total)
+    if not totals:
+        return "нет данных"
+    wet_count = sum(total >= 0.1 for total in totals)
+    if max(totals) < 0.1:
+        return "без осадков"
+    low = min(totals)
+    high = max(totals)
+    amount = (
+        f"{statistics.median(totals):.1f} мм"
+        if high - low < 0.05
+        else f"{low:.1f}–{high:.1f} мм"
+    ).replace(".", ",")
+    return f"{amount}\nосадки: {wet_count}/{len(totals)} моделей"
