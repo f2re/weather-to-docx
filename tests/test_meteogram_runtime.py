@@ -52,12 +52,11 @@ def test_small_weather_icon_cannot_masquerade_as_meteogram(tmp_path: Path) -> No
         require_meteogram_docx(path)
 
 
-def test_runtime_points_to_meteogram_generator() -> None:
+def test_runtime_points_to_professional_generator() -> None:
     status = meteogram_runtime_status()
-    assert status["version"] == "0.4.2"
-    assert status["document_generator"].endswith(
-        ".localized_meteogram_document"
-    )
+    assert status["version"] == "0.5.0"
+    assert status["document_generator"].endswith(".audit_generator")
+    assert status["default_document_mode"] == "expert"
     assert status["meteogram_generator_active"] is True
     assert status["meteograms_enabled_by_default"] is True
     assert status["matplotlib_available"] is True
@@ -65,11 +64,12 @@ def test_runtime_points_to_meteogram_generator() -> None:
     assert status["meteogram_ready"] is True
 
 
-def test_deep_runtime_check_generates_embedded_graph(tmp_path: Path) -> None:
+def test_deep_runtime_check_generates_risk_first_document(tmp_path: Path) -> None:
     result = verify_meteogram_generation(Settings(data_dir=tmp_path / "data"))
     assert result["deep_check"] is True
     assert result["meteogram_embedded"] is True
     assert result["large_media_count"] >= 1
+    assert result["risk_section"] is True
     assert result["error"] is None
 
 
@@ -82,11 +82,9 @@ def test_api_exposes_loaded_runtime_and_rejects_missing_generator(
         diagnostics = client.get("/api/v1/diagnostics")
         assert diagnostics.status_code == 200
         payload = diagnostics.json()
-        assert payload["version"] == "0.4.2"
+        assert payload["version"] == "0.5.0"
         assert payload["meteogram_ready"] is True
-        assert payload["document_generator"].endswith(
-            ".localized_meteogram_document"
-        )
+        assert payload["document_generator"].endswith(".audit_generator")
         assert payload["package_file"].endswith("runtime_check.py")
 
     monkeypatch.setattr(
