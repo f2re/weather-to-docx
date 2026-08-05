@@ -1,4 +1,4 @@
-# ✅ Приёмка Weather to DOCX 0.5.0
+# ✅ Приёмка Weather to DOCX 0.5.1
 
 Версия считается принятой, когда документ позволяет специалисту за 15 секунд определить главное явление, время начала и максимума, интенсивность, поддержку моделей, ансамблевую вероятность и уровень уверенности.
 
@@ -10,6 +10,7 @@ python3 -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -e '.[dev]'
 
+python scripts/check-version.py
 ruff check .
 pytest
 python -m compileall -q src
@@ -19,7 +20,7 @@ node --check src/weather_to_docx/static/compact_report.js
 weather-to-docx-verify --deep
 ```
 
-CI выполняется на Python 3.11, 3.12 и 3.13. Python 3.11 дополнительно использует LibreOffice и Poppler.
+CI выполняется на Python 3.11, 3.12 и 3.13. Python 3.11 дополнительно использует LibreOffice и Poppler. Проверка версии должна подтвердить одинаковое значение в `pyproject.toml`, `VERSION`, пакете, метаданных адаптеров, конфигурациях и документах текущего выпуска.
 
 ## 2. Первая страница
 
@@ -222,6 +223,7 @@ sudo ./setup.sh --keyring /root/weather-release-keyring.gpg
 
 Выпуск разрешён, когда:
 
+- `scripts/check-version.py` подтверждает версию 0.5.1 во всех активных источниках;
 - CI зелёный на Python 3.11–3.13;
 - все новые тесты рисков, согласованности, интервалов осадков и квартилей проходят;
 - визуальная проверка на CI имеет статус `passed`;
