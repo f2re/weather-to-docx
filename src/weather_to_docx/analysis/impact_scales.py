@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import date
-from typing import Iterable
 
 from weather_to_docx.analysis.consensus import daily_precipitation_total
 from weather_to_docx.domain.models import ForecastPoint, ForecastSeries
