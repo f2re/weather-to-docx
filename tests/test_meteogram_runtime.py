@@ -54,7 +54,7 @@ def test_small_weather_icon_cannot_masquerade_as_meteogram(tmp_path: Path) -> No
 
 def test_runtime_points_to_professional_generator() -> None:
     status = meteogram_runtime_status()
-    assert status["version"] == "0.5.0"
+    assert status["version"] == "0.5.1"
     assert status["document_generator"].endswith(".audit_generator")
     assert status["default_document_mode"] == "expert"
     assert status["meteogram_generator_active"] is True
@@ -82,7 +82,7 @@ def test_api_exposes_loaded_runtime_and_rejects_missing_generator(
         diagnostics = client.get("/api/v1/diagnostics")
         assert diagnostics.status_code == 200
         payload = diagnostics.json()
-        assert payload["version"] == "0.5.0"
+        assert payload["version"] == "0.5.1"
         assert payload["meteogram_ready"] is True
         assert payload["document_generator"].endswith(".audit_generator")
         assert payload["package_file"].endswith("runtime_check.py")
