@@ -54,8 +54,10 @@ def test_small_weather_icon_cannot_masquerade_as_meteogram(tmp_path: Path) -> No
 
 def test_runtime_points_to_meteogram_generator() -> None:
     status = meteogram_runtime_status()
-    assert status["version"] == "0.4.1"
-    assert status["document_generator"].endswith(".meteogram_document")
+    assert status["version"] == "0.4.2"
+    assert status["document_generator"].endswith(
+        ".localized_meteogram_document"
+    )
     assert status["meteogram_generator_active"] is True
     assert status["meteograms_enabled_by_default"] is True
     assert status["matplotlib_available"] is True
@@ -80,9 +82,11 @@ def test_api_exposes_loaded_runtime_and_rejects_missing_generator(
         diagnostics = client.get("/api/v1/diagnostics")
         assert diagnostics.status_code == 200
         payload = diagnostics.json()
-        assert payload["version"] == "0.4.1"
+        assert payload["version"] == "0.4.2"
         assert payload["meteogram_ready"] is True
-        assert payload["document_generator"].endswith(".meteogram_document")
+        assert payload["document_generator"].endswith(
+            ".localized_meteogram_document"
+        )
         assert payload["package_file"].endswith("runtime_check.py")
 
     monkeypatch.setattr(
