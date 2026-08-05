@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "weather-to-docx"
-version = "0.4.2"
-description = "Формирование DOCX-прогнозов и профессиональных метеограмм по координатам"
+version = "0.5.0"
+description = "Профессиональные оперативные прогнозы, риски и метеограммы в DOCX"
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [{ name = "f2re" }]
@@ -59,3 +59,5 @@ ignore = ["E501", "B008"]
 
 [tool.ruff.lint.per-file-ignores]
 "src/weather_to_docx/document/generator.py" = ["F401"]
+"src/weather_to_docx/document/audit_generator.py" = ["I001"]
+"src/weather_to_docx/plotting/professional_meteogram.py" = ["F401"]
