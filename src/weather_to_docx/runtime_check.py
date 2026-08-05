@@ -125,7 +125,8 @@ def verify_meteogram_generation(settings: Settings | None = None) -> dict[str, A
             "rendered_pages": inspection.rendered_page_count,
             "blank_pages": list(inspection.blank_pages),
             "edge_touch_pages": list(inspection.edge_touch_pages),
-            "error": inspection.error or inspection.visual_error,
+            "visual_error": inspection.visual_error,
+            "error": inspection.error,
         }
 
 
