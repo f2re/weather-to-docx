@@ -12,6 +12,9 @@ from weather_to_docx.sources.ensemble_catalog import (
     OpenMeteoEcmwfIfsEnsembleSource,
     OpenMeteoGemGepsSource,
 )
+from weather_to_docx.sources.ensemble_enhancements import (
+    install_ensemble_statistics_enhancements,
+)
 from weather_to_docx.sources.gfs_nomads import GfsNomadsSource
 from weather_to_docx.sources.open_meteo import (
     OpenMeteoDwdIconGlobalSource,
@@ -29,6 +32,7 @@ from weather_to_docx.sources.open_meteo_ensemble import (
 
 class SourceRegistry:
     def __init__(self, settings: Settings) -> None:
+        install_ensemble_statistics_enhancements()
         self._sources: dict[str, ForecastSource] = {}
         self.register(DemoSource())
 
@@ -45,9 +49,6 @@ class SourceRegistry:
                 max_retries=settings.http_max_retries,
                 user_agent=settings.http_user_agent,
             )
-            # Обычный отчёт не должен запрашивать десятки исследовательских
-            # полей. При явном options["hourly"] адаптер всё равно использует
-            # пользовательский набор и не ограничивает специальный сценарий.
             source.hourly_parameters = OPERATIONAL_HOURLY_PARAMETERS
             self.register(source)
 

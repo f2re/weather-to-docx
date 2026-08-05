@@ -100,6 +100,9 @@ def _deterministic(
                 ),
                 "surface_pressure": ForecastValue(value=1017.0, unit="hPa"),
                 "cloud_cover": ForecastValue(value=80 if rain else 45, unit="%"),
+                "cloud_cover_low": ForecastValue(value=40 if rain else 20, unit="%"),
+                "cloud_cover_mid": ForecastValue(value=25 if rain else 15, unit="%"),
+                "cloud_cover_high": ForecastValue(value=15 if rain else 10, unit="%"),
                 "visibility": ForecastValue(value=18_000, unit="m"),
                 "cape": ForecastValue(value=250 if rain else 20, unit="J/kg"),
                 "shortwave_radiation": ForecastValue(value=450, unit="W/m²"),
@@ -148,18 +151,16 @@ def _ensemble(location: Location) -> ForecastSeries:
         probability = 65 if day_index in {1, 4} else 10
         values = {
             "temperature_2m": ForecastValue(value=18.0 + day_index * 0.4, unit="°C"),
-            "temperature_2m_p10": ForecastValue(
-                value=15.0 + day_index * 0.4,
+            "temperature_2m_median": ForecastValue(
+                value=18.0 + day_index * 0.4,
                 unit="°C",
                 quality=calculated,
                 sample_count=31,
             ),
-            "temperature_2m_p90": ForecastValue(
-                value=22.0 + day_index * 0.4,
-                unit="°C",
-                quality=calculated,
-                sample_count=31,
-            ),
+            "temperature_2m_p10": ForecastValue(value=15.0 + day_index * 0.4, unit="°C", quality=calculated, sample_count=31),
+            "temperature_2m_p25": ForecastValue(value=17.0 + day_index * 0.4, unit="°C", quality=calculated, sample_count=31),
+            "temperature_2m_p75": ForecastValue(value=20.0 + day_index * 0.4, unit="°C", quality=calculated, sample_count=31),
+            "temperature_2m_p90": ForecastValue(value=22.0 + day_index * 0.4, unit="°C", quality=calculated, sample_count=31),
             "precipitation_probability_ge_0p1mm": ForecastValue(
                 value=probability,
                 unit="%",
@@ -176,23 +177,9 @@ def _ensemble(location: Location) -> ForecastSeries:
                 sample_count=31,
                 accumulation_hours=6,
             ),
-            "wind_gusts_10m_p90": ForecastValue(
-                value=12.0 + day_index * 0.3,
-                unit="m/s",
-                quality=calculated,
-                sample_count=31,
-            ),
-            "ensemble_member_count": ForecastValue(
-                value=30,
-                quality=QualityFlag.SUSPECT,
-                sample_count=30,
-            ),
-            "ensemble_member_coverage": ForecastValue(
-                value=97,
-                unit="%",
-                quality=QualityFlag.SUSPECT,
-                sample_count=30,
-            ),
+            "wind_gusts_10m_p90": ForecastValue(value=12.0 + day_index * 0.3, unit="m/s", quality=calculated, sample_count=31),
+            "ensemble_member_count": ForecastValue(value=30, quality=QualityFlag.SUSPECT, sample_count=30),
+            "ensemble_member_coverage": ForecastValue(value=97, unit="%", quality=QualityFlag.SUSPECT, sample_count=30),
         }
         points.append(
             ForecastPoint(
@@ -200,7 +187,7 @@ def _ensemble(location: Location) -> ForecastSeries:
                 valid_time_local=valid_local,
                 lead_hours=hour,
                 weather_code=61 if probability >= 60 else 2,
-                is_day=True,
+                is_day=None,
                 values=values,
             )
         )
@@ -227,41 +214,22 @@ def _ensemble(location: Location) -> ForecastSeries:
 
 def _report_series(location: Location) -> list[ForecastSeries]:
     return [
-        _deterministic(
-            location,
-            source_id="open_meteo_gfs",
-            model="NOAA GFS 0.25°",
-            incomplete=True,
-        ),
-        _deterministic(
-            location,
-            source_id="open_meteo_ecmwf_ifs",
-            model="ECMWF IFS 0.25° Open Data",
-            offset=0.0,
-        ),
-        _deterministic(
-            location,
-            source_id="open_meteo_dwd_icon_global",
-            model="DWD ICON Global",
-            offset=1.1,
-        ),
-        _deterministic(
-            location,
-            source_id="open_meteo_gem_gdps",
-            model="ECCC GEM Global (GDPS)",
-            offset=-0.8,
-        ),
+        _deterministic(location, source_id="open_meteo_gfs", model="NOAA GFS 0.25°", incomplete=True),
+        _deterministic(location, source_id="open_meteo_ecmwf_ifs", model="ECMWF IFS 0.25° Open Data", offset=0.0),
+        _deterministic(location, source_id="open_meteo_dwd_icon_global", model="DWD ICON Global", offset=1.1),
+        _deterministic(location, source_id="open_meteo_gem_gdps", model="ECCC GEM Global (GDPS)", offset=-0.8),
         _ensemble(location),
     ]
 
 
 def _generate_report(tmp_path: Path) -> Path:
     location = _location()
-    output = tmp_path / "compact-report.docx"
+    output = tmp_path / "professional-report.docx"
     ScientificDocumentGenerator(tmp_path / "icons").generate(
         location=location,
         series=_report_series(location),
         options=DocumentOptions(
+            document_mode="expert",
             page_size="A4",
             parameter_profile="operational",
             include_all_parameters=False,
@@ -274,30 +242,29 @@ def _generate_report(tmp_path: Path) -> Path:
 
 
 def _all_text(document: Document) -> str:
-    paragraphs = [paragraph.text for paragraph in document.paragraphs]
-    cells = [
-        cell.text
-        for table in document.tables
-        for row in table.rows
-        for cell in row.cells
-    ]
-    return "\n".join([*paragraphs, *cells])
+    return "\n".join(
+        [paragraph.text for paragraph in document.paragraphs]
+        + [cell.text for table in document.tables for row in table.rows for cell in row.cells]
+    )
 
 
-def test_report_contains_summary_and_model_meteogram_appendices(tmp_path: Path) -> None:
+def test_report_is_risk_first_and_uses_graph_only_appendices(tmp_path: Path) -> None:
     output = _generate_report(tmp_path)
     document = Document(output)
     text = _all_text(document)
 
-    assert len(document.tables) == 6
+    assert len(document.tables) == 3
+    assert "Ключевые риски" in text
     assert "Прогноз по дням" in text
     assert "Прогноз по контрольным срокам" in text
-    assert "Согласованность" in text
+    assert "Уверенность" in text
     assert "Не использованы в сводке из-за неполных данных: NOAA GFS" in text
-    assert "Модель ECMWF IFS" in text
-    assert "Модель ICON" in text
-    assert "Модель GDPS" in text
-    assert "Неопределённость прогноза" in text
+    assert "Метеограмма модели ECMWF IFS" in text
+    assert "Метеограмма модели ICON" in text
+    assert "Метеограмма модели GDPS" in text
+    assert "Ансамблевая оценка — GEFS" in text
+    assert "формосохраняющим методом PCHIP" not in text
+    assert "Согласованность" not in text
 
     assert "1. Наглядный прогноз" not in text
     assert "2. Подробный метеорологический отчёт" not in text
@@ -312,7 +279,6 @@ def test_report_contains_summary_and_model_meteogram_appendices(tmp_path: Path) 
     assert "ET₀" not in text
     assert "Почва" not in text
     assert "Радиация" not in text
-
     assert "m/s" not in text
     assert re.search(r"(?<![А-Яа-яЁё])mm(?![А-Яа-яЁё])", text) is None
     assert "hPa" not in text
@@ -337,13 +303,14 @@ def test_report_contains_summary_and_model_meteogram_appendices(tmp_path: Path) 
     assert len(media) >= 4
 
 
-def test_report_without_meteograms_remains_two_pages_structure(tmp_path: Path) -> None:
+def test_report_without_meteograms_keeps_compact_ensemble_summary(tmp_path: Path) -> None:
     location = _location()
     output = tmp_path / "without-meteograms.docx"
     ScientificDocumentGenerator(tmp_path / "icons").generate(
         location=location,
         series=_report_series(location),
         options=DocumentOptions(
+            document_mode="brief",
             include_meteograms=False,
             page_size="A4",
             parameter_profile="operational",
@@ -351,7 +318,7 @@ def test_report_without_meteograms_remains_two_pages_structure(tmp_path: Path) -
         output_path=output,
     )
     document = Document(output)
-    assert len(document.tables) == 3
+    assert len(document.tables) == 4
     assert not [
         shape
         for shape in document.inline_shapes
@@ -359,21 +326,12 @@ def test_report_without_meteograms_remains_two_pages_structure(tmp_path: Path) -
     ]
 
 
-def test_incomplete_only_source_is_rejected_instead_of_printing_blanks(
-    tmp_path: Path,
-) -> None:
+def test_incomplete_only_source_is_rejected_instead_of_printing_blanks(tmp_path: Path) -> None:
     location = _location()
     with pytest.raises(ValueError, match="не содержит достаточного набора ключевых полей"):
         ScientificDocumentGenerator(tmp_path / "icons").generate(
             location=location,
-            series=[
-                _deterministic(
-                    location,
-                    source_id="open_meteo_gfs",
-                    model="NOAA GFS 0.25°",
-                    incomplete=True,
-                )
-            ],
+            series=[_deterministic(location, source_id="open_meteo_gfs", model="NOAA GFS 0.25°", incomplete=True)],
             options=DocumentOptions(),
             output_path=tmp_path / "invalid.docx",
         )

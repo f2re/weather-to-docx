@@ -5,10 +5,6 @@ import statistics
 from collections.abc import Iterable
 from dataclasses import dataclass
 
-# Переменные с выраженно асимметричными, ограниченными или неотрицательными
-# распределениями получают устойчивый медианный центр. Для температуры и
-# давления сохраняется среднее, чтобы стандартное отклонение имело обычный
-# смысл ансамблевого spread относительно среднего.
 ROBUST_CENTRE_PARAMETERS = frozenset(
     {
         "precipitation",
@@ -35,6 +31,8 @@ class EnsembleStatistics:
     median: float
     standard_deviation: float
     p10: float
+    p25: float
+    p75: float
     p90: float
     minimum: float
     maximum: float
@@ -43,15 +41,14 @@ class EnsembleStatistics:
     def interdecile_range(self) -> float:
         return self.p90 - self.p10
 
+    @property
+    def interquartile_range(self) -> float:
+        return self.p75 - self.p25
+
 
 @dataclass(frozen=True, slots=True)
 class CircularStatistics:
-    """Статистика направления на единичной окружности.
-
-    `resultant_length` R находится от 0 до 1. R≈1 означает согласованное
-    направление, R≈0 — взаимную компенсацию направлений. В последнем случае
-    среднее направление физически не определено и `mean_degrees` равно None.
-    """
+    """Статистика направления на единичной окружности."""
 
     count: int
     mean_degrees: float | None
@@ -72,6 +69,8 @@ def ensemble_statistics(values: Iterable[float]) -> EnsembleStatistics:
         median=quantile_type8(sample, 0.5),
         standard_deviation=statistics.pstdev(sample) if len(sample) >= 2 else 0.0,
         p10=quantile_type8(sample, 0.10),
+        p25=quantile_type8(sample, 0.25),
+        p75=quantile_type8(sample, 0.75),
         p90=quantile_type8(sample, 0.90),
         minimum=min(sample),
         maximum=max(sample),
@@ -103,12 +102,7 @@ def circular_statistics(
     *,
     minimum_resultant_length: float = 1e-6,
 ) -> CircularStatistics:
-    """Вычислить круговое среднее и длину результирующего вектора.
-
-    Арифметическое среднее углов неприменимо на границе 0/360°. При почти
-    нулевой длине результирующего вектора направления не согласованы, поэтому
-    функция возвращает `mean_degrees=None`, а не произвольный первый член.
-    """
+    """Вычислить круговое среднее и длину результирующего вектора."""
 
     if not 0 <= minimum_resultant_length <= 1:
         raise ValueError("Минимальная длина результирующего вектора должна быть от 0 до 1")
@@ -132,24 +126,15 @@ def circular_statistics(
 
 
 def circular_mean_degrees(values: Iterable[float]) -> float | None:
-    """Совместимый помощник: вернуть направление или None при несогласованности."""
-
     return circular_statistics(values).mean_degrees
 
 
 def circular_resultant_length(values: Iterable[float]) -> float:
-    """Вернуть R — меру согласованности направлений от 0 до 1."""
-
     return circular_statistics(values).resultant_length
 
 
 def quantile_type8(values: Iterable[float], probability: float) -> float:
-    """Выборочная квантиль Hyndman–Fan type 8.
-
-    Type 8 приблизительно несмещён по медиане для произвольного непрерывного
-    распределения. Краевое поведение соответствует определению, применяемому
-    в R ``quantile(type=8)``.
-    """
+    """Выборочная квантиль Hyndman–Fan type 8."""
 
     if not 0.0 <= probability <= 1.0:
         raise ValueError("Вероятность квантили должна быть от 0 до 1")

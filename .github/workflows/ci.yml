@@ -61,7 +61,7 @@ jobs:
       - name: Проверка компиляции
         run: python -m compileall -q src
 
-      - name: Сборка wheel и проверка локального интерфейса
+      - name: Сборка wheel и проверка профессионального интерфейса
         run: |
           rm -rf dist/wheels
           python -m pip wheel --no-deps . --wheel-dir dist/wheels
@@ -80,17 +80,22 @@ jobs:
           required = {
               "weather_to_docx/static/index.html",
               "weather_to_docx/static/styles.css",
+              "weather_to_docx/static/reliability.css",
+              "weather_to_docx/static/audit.css",
               "weather_to_docx/static/app.js",
               "weather_to_docx/static/reliability.js",
               "weather_to_docx/static/compact_report.js",
+              "weather_to_docx/analysis/__init__.py",
+              "weather_to_docx/analysis/consensus.py",
               "weather_to_docx/ensemble/science.py",
               "weather_to_docx/document/scientific_generator.py",
-              "weather_to_docx/document/compact_generator.py",
-              "weather_to_docx/document/meteogram_document.py",
+              "weather_to_docx/document/audit_generator.py",
+              "weather_to_docx/document/render_validation.py",
               "weather_to_docx/document/verification.py",
-              "weather_to_docx/plotting/__init__.py",
-              "weather_to_docx/plotting/meteogram.py",
+              "weather_to_docx/plotting/professional_meteogram.py",
+              "weather_to_docx/plotting/russian_meteogram.py",
               "weather_to_docx/plotting/smoothing.py",
+              "weather_to_docx/sources/ensemble_enhancements.py",
               "weather_to_docx/domain/profiles.py",
               "weather_to_docx/geocoding/dadata.py",
               "weather_to_docx/geocoding/timezone.py",
@@ -117,11 +122,16 @@ jobs:
           MPLCONFIGDIR: /tmp/weather-to-docx-matplotlib-sample
         run: weather-to-docx sample --output var/ci-sample --hours 24
 
-      - name: Проверить встроенный график загруженного runtime
+      - name: Проверить риски, график и физический рендер
         env:
           MPLBACKEND: Agg
           MPLCONFIGDIR: /tmp/weather-to-docx-matplotlib-runtime
-        run: weather-to-docx-verify --deep
+        run: |
+          weather-to-docx-verify --deep | tee var/runtime-check.json
+          if [[ '${{ matrix.python-version }}' == '3.11' ]]; then
+            grep -q '"visual_check": "passed"' var/runtime-check.json
+            grep -q '"risk_section": true' var/runtime-check.json
+          fi
 
       - name: Собрать автономный комплект без GRIB-дополнения
         if: matrix.python-version == '3.11'
@@ -169,6 +179,7 @@ jobs:
             dist/offline/offline-build.log
             dist/offline/contents.txt
             dist/offline/*.sha256
+            var/runtime-check.json
           if-no-files-found: warn
 
       - name: Сохранить DOCX-пример
@@ -176,5 +187,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sample-docx
-          path: var/ci-sample/**/*.docx
+          path: var/ci-sample/**/*
           if-no-files-found: error

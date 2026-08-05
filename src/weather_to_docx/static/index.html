@@ -4,18 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light">
-  <title>Weather to DOCX 0.4.1</title>
-  <link rel="stylesheet" href="/static/styles.css?v=0.4.1">
-  <link rel="stylesheet" href="/static/reliability.css?v=0.4.1">
-  <script src="/static/app.js?v=0.4.1" defer></script>
-  <script src="/static/reliability.js?v=0.4.1" defer></script>
-  <script src="/static/compact_report.js?v=0.4.1" defer></script>
+  <title>Weather to DOCX 0.5.0</title>
+  <link rel="stylesheet" href="/static/styles.css?v=0.5.0">
+  <link rel="stylesheet" href="/static/reliability.css?v=0.5.0">
+  <script src="/static/app.js?v=0.5.0" defer></script>
+  <script src="/static/reliability.js?v=0.5.0" defer></script>
+  <script src="/static/compact_report.js?v=0.5.0" defer></script>
 </head>
 <body>
   <header class="topbar">
     <div>
       <h1>Weather to DOCX</h1>
-      <p>Сводный прогноз и профессиональные метеограммы по моделям</p>
+      <p>Оперативный прогноз, риски и профессиональные метеограммы</p>
     </div>
     <div class="top-actions">
       <span id="healthBadge" class="badge">Проверка…</span>
@@ -30,7 +30,6 @@
         <div><span class="step">1</span><h2>Точки прогноза</h2></div>
         <span id="locationCount" class="muted">0 выбрано</span>
       </div>
-
       <div class="quick-grid">
         <div class="quick-block">
           <label for="cityQuery">Город или адрес</label>
@@ -41,7 +40,6 @@
           <div id="citySuggestions" class="suggestions" aria-live="polite"></div>
           <small id="dadataHint" class="muted">Геокодер проверяется…</small>
         </div>
-
         <form id="locationForm" class="quick-block compact-form">
           <label>Координаты</label>
           <div class="coordinate-row reliability-coordinate-row">
@@ -54,41 +52,19 @@
           <small id="timezoneHint" class="muted">Если поле пустое, часовой пояс определяется по координатам.</small>
         </form>
       </div>
-
       <div class="toolbar">
-        <label class="file-button">
-          <span>Импорт TXT / CSV / JSON</span>
-          <input id="locationFile" type="file" accept=".txt,.csv,.json,text/plain,text/csv,application/json">
-        </label>
+        <label class="file-button"><span>Импорт TXT / CSV / JSON</span><input id="locationFile" type="file" accept=".txt,.csv,.json,text/plain,text/csv,application/json"></label>
         <button id="selectAllLocations" class="button ghost" type="button">Выбрать все</button>
         <button id="clearLocationSelection" class="button ghost" type="button">Снять выбор</button>
         <button id="exportLocations" class="button ghost" type="button">Экспорт JSON</button>
       </div>
-
       <div id="importPreview" class="import-preview" hidden>
-        <div class="section-title">
-          <div><h3>Предварительная проверка импорта</h3></div>
-          <span id="importPreviewSummary" class="muted"></span>
-        </div>
+        <div class="section-title"><div><h3>Предварительная проверка импорта</h3></div><span id="importPreviewSummary" class="muted"></span></div>
         <div id="importWarnings" class="import-warnings"></div>
-        <div class="table-wrap import-table-wrap">
-          <table class="table">
-            <thead><tr><th>Строка</th><th>Точка</th><th>Координаты</th><th>Часовой пояс</th></tr></thead>
-            <tbody id="importPreviewBody"></tbody>
-          </table>
-        </div>
-        <div class="import-actions">
-          <button id="confirmImport" class="button primary" type="button">Добавить проверенные точки</button>
-          <button id="cancelImport" class="button ghost" type="button">Отменить импорт</button>
-        </div>
+        <div class="table-wrap import-table-wrap"><table class="table"><thead><tr><th>Строка</th><th>Точка</th><th>Координаты</th><th>Часовой пояс</th></tr></thead><tbody id="importPreviewBody"></tbody></table></div>
+        <div class="import-actions"><button id="confirmImport" class="button primary" type="button">Добавить проверенные точки</button><button id="cancelImport" class="button ghost" type="button">Отменить импорт</button></div>
       </div>
-
-      <div class="table-wrap">
-        <table class="table">
-          <thead><tr><th></th><th>Точка</th><th>Координаты и время</th><th>Группа</th><th></th></tr></thead>
-          <tbody id="locationsBody"><tr><td colspan="5" class="empty">Загрузка…</td></tr></tbody>
-        </table>
-      </div>
+      <div class="table-wrap"><table class="table"><thead><tr><th></th><th>Точка</th><th>Координаты и время</th><th>Группа</th><th></th></tr></thead><tbody id="locationsBody"><tr><td colspan="5" class="empty">Загрузка…</td></tr></tbody></table></div>
     </section>
 
     <section class="card full">
@@ -96,56 +72,48 @@
         <div><span class="step">2</span><h2>Модели прогноза</h2></div>
         <button id="recommendedSources" class="button secondary" type="button">Рекомендуемый набор</button>
       </div>
-      <p class="callout">
-        Первые две страницы содержат общую сводку. Затем для каждой пригодной модели формируется одна страница с компактной таблицей и метеограммой на весь срок. Неполные ряды автоматически исключаются.
-      </p>
+      <p class="callout">Система оценивает полноту данных, межмодельное подтверждение явлений и неопределённость ансамбля. Одиночный сценарий не выдаётся за устойчивый прогноз.</p>
       <div class="model-columns">
-        <div>
-          <h3>Модели</h3>
-          <div id="deterministicSources" class="model-list"></div>
-        </div>
-        <div>
-          <h3>Ансамбль</h3>
-          <p class="muted">Одна выбранная система получает отдельную вероятностную метеограмму.</p>
-          <div id="ensembleSources" class="model-list"></div>
-        </div>
+        <div><h3>Детерминированные модели</h3><div id="deterministicSources" class="model-list"></div></div>
+        <div><h3>Ансамбль</h3><p class="muted">Используется одна выбранная вероятностная система.</p><div id="ensembleSources" class="model-list"></div></div>
       </div>
       <div id="sourcesList" hidden></div>
     </section>
 
     <section class="card settings-card">
       <div class="section-title"><div><span class="step">3</span><h2>Документ</h2></div></div>
+      <div class="mode-selector" role="radiogroup" aria-label="Режим документа">
+        <label><input type="radio" name="documentMode" value="brief"><span><strong>Краткий</strong><small>Сводка, риски и контрольные сроки</small></span></label>
+        <label><input type="radio" name="documentMode" value="expert" checked><span><strong>Экспертный</strong><small>Сводка и отдельная метеограмма каждой модели</small></span></label>
+        <label><input type="radio" name="documentMode" value="full"><span><strong>Полный</strong><small>Метеограммы и дополнительные модельные таблицы</small></span></label>
+      </div>
       <div class="settings-grid">
         <label>Горизонт, суток<input id="forecastDays" type="number" min="1" max="7" value="7"></label>
         <label>Пороги осадков, мм<input id="precipitationThresholds" value="0.1, 1, 5"></label>
         <label class="wide">Заголовок<input id="documentTitle" value="Метеорологический прогноз"></label>
-        <label class="wide checkbox-line"><input id="includeMeteograms" type="checkbox" checked> Добавить метеограммы по каждой модели и ансамблю</label>
+        <label class="wide checkbox-line"><input id="includeMeteograms" type="checkbox" checked> Добавить метеограммы</label>
       </div>
       <input id="pageSize" type="hidden" value="A4">
       <input id="parameterProfile" type="hidden" value="operational">
-      <p class="callout">
-        Метеограмма показывает температуру, влажность, полупрозрачные слои облачности, осадки, ветер, порывы и давление. Для ансамбля добавляется диапазон q10–q90 и вероятности превышения порогов осадков.
-      </p>
+      <div id="documentPlan" class="document-plan" aria-live="polite"></div>
       <button id="createJob" class="button primary large" type="button">Сформировать прогноз</button>
       <p id="selectionSummary" class="muted">Выберите точки и модели.</p>
       <p id="horizonSummary" class="muted"></p>
     </section>
 
     <section class="card status-card">
-      <div class="section-title"><div><h2>Система</h2></div></div>
-      <div id="diagnostics" class="diagnostics"></div>
-      <div id="reliabilityStatus" class="reliability-status" aria-live="polite"></div>
+      <details class="diagnostics-details">
+        <summary>Состояние и техническая диагностика</summary>
+        <div id="diagnostics" class="diagnostics"></div>
+        <div id="reliabilityStatus" class="reliability-status" aria-live="polite"></div>
+      </details>
     </section>
 
     <section class="card full">
-      <div class="section-title">
-        <div><h2>Задания и результаты</h2></div>
-        <button id="refreshJobs" class="button ghost" type="button">Обновить</button>
-      </div>
+      <div class="section-title"><div><h2>Задания и результаты</h2></div><button id="refreshJobs" class="button ghost" type="button">Обновить</button></div>
       <div id="jobsList" class="jobs"><div class="empty">Загрузка…</div></div>
     </section>
   </main>
-
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 </body>
 </html>

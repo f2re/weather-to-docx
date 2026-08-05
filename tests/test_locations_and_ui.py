@@ -27,9 +27,11 @@ def test_operator_interface_and_static_assets(tmp_path: Path) -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "Weather to DOCX" in response.text
-    assert "Сводный прогноз и профессиональные метеограммы" in response.text
-    assert "Модели прогноза" in response.text
-    assert "для каждой пригодной модели" in response.text
+    assert "Оперативный прогноз, риски и профессиональные метеограммы" in response.text
+    assert "Детерминированные модели" in response.text
+    assert "Одиночный сценарий не выдаётся" in response.text
+    assert "documentMode" in response.text
+    assert "documentPlan" in response.text
     assert "includeMeteograms" in response.text
 
     response = client.get("/static/app.js")
@@ -38,15 +40,23 @@ def test_operator_interface_and_static_assets(tmp_path: Path) -> None:
 
     response = client.get("/static/compact_report.js")
     assert response.status_code == 200
-    assert "createCompactJob" in response.text
-    assert 'page_size: "A4"' in response.text
-    assert "include_all_parameters: false" in response.text
+    assert "createProfessionalJob" in response.text
+    assert "currentDocumentMode" in response.text
+    assert "renderDocumentPlan" in response.text
+    assert "decorateJobs" in response.text
+    assert "document_mode: mode" in response.text
     assert "include_meteograms: includeMeteograms" in response.text
     assert 'meteogram_smoothing: "pchip"' in response.text
 
     response = client.get("/static/styles.css")
     assert response.status_code == 200
     assert "--accent" in response.text
+
+    response = client.get("/static/audit.css")
+    assert response.status_code == 200
+    assert ".mode-selector" in response.text
+    assert ".document-plan" in response.text
+    assert ".job-audit" in response.text
 
 
 def test_location_crud_import_export_and_diagnostics(tmp_path: Path) -> None:

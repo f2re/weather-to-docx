@@ -11,7 +11,9 @@ from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from pathlib import Path
 
+from weather_to_docx.document.render_validation import extract_primary_meteogram
 from weather_to_docx.document.scientific_generator import ScientificDocumentGenerator
+from weather_to_docx.document.verification import inspect_meteogram_docx
 from weather_to_docx.domain.models import (
     BatchArtifact,
     BatchRequest,
@@ -139,7 +141,8 @@ class ForecastBatchService:
             total,
             "Формирование DOCX и архива",
         )
-        result = self.generate_from_collected(
+        result = await asyncio.to_thread(
+            self.generate_from_collected,
             request=request,
             collected=collected,
             output_root=output_root,
@@ -228,8 +231,23 @@ class ForecastBatchService:
                     options=request.document,
                     output_path=path,
                 )
+                inspection = inspect_meteogram_docx(
+                    path,
+                    render_check=request.document.include_meteograms,
+                )
+                metadata = inspection.metadata()
+                if inspection.visual_check == "failed":
+                    result.warnings.append(
+                        f"{item.location.name}: визуальная проверка DOCX выявила "
+                        "пустую страницу или содержимое у края листа"
+                    )
                 generated_documents.append(path)
-                artifact = self._artifact(path, "docx", item.location.id)
+                artifact = self._artifact(
+                    path,
+                    "docx",
+                    item.location.id,
+                    metadata=metadata,
+                )
                 result.artifacts.append(artifact)
                 document_manifest.append(
                     {
@@ -238,8 +256,31 @@ class ForecastBatchService:
                         "name": path.name,
                         "sha256": artifact.sha256,
                         "size_bytes": artifact.size_bytes,
+                        "metadata": metadata,
                     }
                 )
+
+                if request.document.include_meteograms and inspection.ready:
+                    preview = extract_primary_meteogram(path)
+                    if preview is not None:
+                        preview_bytes, media_type = preview
+                        extension = ".png" if media_type == "image/png" else ".jpg"
+                        preview_path = batch_dir / (
+                            safe_filename(f"Метеограмма_{item.location.name}") + extension
+                        )
+                        preview_path.write_bytes(preview_bytes)
+                        result.artifacts.append(
+                            self._artifact(
+                                preview_path,
+                                "preview",
+                                item.location.id,
+                                metadata={
+                                    "media_type": media_type,
+                                    "source_document": path.name,
+                                },
+                            )
+                        )
+
                 for forecast in item.series:
                     source_manifest.append(
                         {
@@ -267,13 +308,14 @@ class ForecastBatchService:
             result.status = JobStatus.COMPLETED
 
         manifest = {
-            "schema_version": 2,
+            "schema_version": 3,
             "batch_id": batch_id,
             "batch_name": request.batch_name,
             "created_at_utc": datetime.now(UTC).isoformat(),
             "status": result.status.value,
             "document_composition": (
-                "deterministic model sections followed by one scientific ensemble section"
+                "risk-first summary, dynamic control-time layout, "
+                "model meteograms and separate ensemble uncertainty"
             ),
             "locations": [
                 location.model_dump(mode="json")
@@ -287,6 +329,7 @@ class ForecastBatchService:
                     "name": item["name"],
                     "sha256": item["sha256"],
                     "size_bytes": item["size_bytes"],
+                    "metadata": item["metadata"],
                 }
                 for item in document_manifest
             ],
@@ -327,6 +370,8 @@ class ForecastBatchService:
         path: Path,
         kind: str,
         location_id: str | None,
+        *,
+        metadata: dict | None = None,
     ) -> BatchArtifact:
         return BatchArtifact(
             kind=kind,
@@ -334,6 +379,7 @@ class ForecastBatchService:
             sha256=sha256_file(path),
             size_bytes=path.stat().st_size,
             location_id=location_id,
+            metadata=metadata or {},
         )
 
 
