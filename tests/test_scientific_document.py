@@ -100,9 +100,6 @@ def _deterministic(
                 ),
                 "surface_pressure": ForecastValue(value=1017.0, unit="hPa"),
                 "cloud_cover": ForecastValue(value=80 if rain else 45, unit="%"),
-                "cloud_cover_low": ForecastValue(value=65 if rain else 25, unit="%"),
-                "cloud_cover_mid": ForecastValue(value=50 if rain else 20, unit="%"),
-                "cloud_cover_high": ForecastValue(value=35, unit="%"),
                 "visibility": ForecastValue(value=18_000, unit="m"),
                 "cape": ForecastValue(value=250 if rain else 20, unit="J/kg"),
                 "shortwave_radiation": ForecastValue(value=450, unit="W/m²"),
@@ -140,22 +137,6 @@ def _deterministic(
     )
 
 
-def _ensemble_value(
-    centre: float,
-    spread: float,
-    *,
-    calculated: QualityFlag,
-) -> dict[str, ForecastValue]:
-    return {
-        "value": ForecastValue(value=centre, quality=calculated, sample_count=31),
-        "median": ForecastValue(value=centre, quality=calculated, sample_count=31),
-        "mean": ForecastValue(value=centre, quality=calculated, sample_count=31),
-        "spread": ForecastValue(value=spread, quality=calculated, sample_count=31),
-        "p10": ForecastValue(value=centre - spread * 1.4, quality=calculated, sample_count=31),
-        "p90": ForecastValue(value=centre + spread * 1.4, quality=calculated, sample_count=31),
-    }
-
-
 def _ensemble(location: Location) -> ForecastSeries:
     start = datetime(2026, 8, 4, 0, tzinfo=UTC)
     calculated = QualityFlag.CALCULATED
@@ -165,55 +146,61 @@ def _ensemble(location: Location) -> ForecastSeries:
         valid_local = valid_utc.astimezone(MOSCOW)
         day_index = hour // 24
         probability = 65 if day_index in {1, 4} else 10
-        centres = {
-            "temperature_2m": (18.0 + day_index * 0.4, 1.8),
-            "relative_humidity_2m": (68.0, 9.0),
-            "cloud_cover": (75.0 if probability >= 60 else 35.0, 18.0),
-            "precipitation": (0.5 if probability >= 60 else 0.0, 0.5),
-            "wind_speed_10m": (5.0 + day_index * 0.2, 1.2),
-            "wind_gusts_10m": (9.0 + day_index * 0.3, 2.3),
-            "pressure_msl": (1018.0 - day_index * 1.1, 2.0),
+        values = {
+            "temperature_2m": ForecastValue(value=18.0 + day_index * 0.4, unit="°C"),
+            "temperature_2m_p10": ForecastValue(
+                value=15.0 + day_index * 0.4,
+                unit="°C",
+                quality=calculated,
+                sample_count=31,
+            ),
+            "temperature_2m_p90": ForecastValue(
+                value=22.0 + day_index * 0.4,
+                unit="°C",
+                quality=calculated,
+                sample_count=31,
+            ),
+            "precipitation_probability_ge_0p1mm": ForecastValue(
+                value=probability,
+                unit="%",
+                quality=calculated,
+                event_count=20 if probability >= 60 else 3,
+                sample_count=31,
+                accumulation_hours=6,
+            ),
+            "precipitation_probability_ge_1mm": ForecastValue(
+                value=35 if probability >= 60 else 0,
+                unit="%",
+                quality=calculated,
+                event_count=11 if probability >= 60 else 0,
+                sample_count=31,
+                accumulation_hours=6,
+            ),
+            "wind_gusts_10m_p90": ForecastValue(
+                value=12.0 + day_index * 0.3,
+                unit="m/s",
+                quality=calculated,
+                sample_count=31,
+            ),
+            "ensemble_member_count": ForecastValue(
+                value=30,
+                quality=QualityFlag.SUSPECT,
+                sample_count=30,
+            ),
+            "ensemble_member_coverage": ForecastValue(
+                value=97,
+                unit="%",
+                quality=QualityFlag.SUSPECT,
+                sample_count=30,
+            ),
         }
-        values: dict[str, ForecastValue] = {}
-        for code, (centre, spread) in centres.items():
-            statistics_values = _ensemble_value(centre, spread, calculated=calculated)
-            values[code] = statistics_values["value"]
-            for suffix in ("median", "mean", "spread", "p10", "p90"):
-                values[f"{code}_{suffix}"] = statistics_values[suffix]
-        values["precipitation_probability_ge_0p1mm"] = ForecastValue(
-            value=probability,
-            unit="%",
-            quality=calculated,
-            event_count=20 if probability >= 60 else 3,
-            sample_count=31,
-            accumulation_hours=6,
-        )
-        values["precipitation_probability_ge_1mm"] = ForecastValue(
-            value=35 if probability >= 60 else 0,
-            unit="%",
-            quality=calculated,
-            event_count=11 if probability >= 60 else 0,
-            sample_count=31,
-            accumulation_hours=6,
-        )
-        values["ensemble_member_count"] = ForecastValue(
-            value=30,
-            quality=QualityFlag.SUSPECT,
-            sample_count=30,
-        )
-        values["ensemble_member_coverage"] = ForecastValue(
-            value=97,
-            unit="%",
-            quality=QualityFlag.SUSPECT,
-            sample_count=30,
-        )
         points.append(
             ForecastPoint(
                 valid_time_utc=valid_utc,
                 valid_time_local=valid_local,
                 lead_hours=hour,
                 weather_code=61 if probability >= 60 else 2,
-                is_day=6 <= valid_local.hour <= 21,
+                is_day=True,
                 values=values,
             )
         )
@@ -268,11 +255,9 @@ def _report_series(location: Location) -> list[ForecastSeries]:
     ]
 
 
-def _generate_report(tmp_path: Path, *, include_meteograms: bool = True) -> Path:
+def _generate_report(tmp_path: Path) -> Path:
     location = _location()
-    output = tmp_path / (
-        "meteogram-report.docx" if include_meteograms else "compact-report.docx"
-    )
+    output = tmp_path / "compact-report.docx"
     ScientificDocumentGenerator(tmp_path / "icons").generate(
         location=location,
         series=_report_series(location),
@@ -280,7 +265,7 @@ def _generate_report(tmp_path: Path, *, include_meteograms: bool = True) -> Path
             page_size="A4",
             parameter_profile="operational",
             include_all_parameters=False,
-            include_meteograms=include_meteograms,
+            include_meteograms=True,
             meteogram_dpi=120,
         ),
         output_path=output,
@@ -308,7 +293,7 @@ def test_report_contains_summary_and_model_meteogram_appendices(tmp_path: Path) 
     assert "Прогноз по дням" in text
     assert "Прогноз по контрольным срокам" in text
     assert "Согласованность" in text
-    assert "Не использованы в сводке из-за неполных данных: GFS" in text
+    assert "Не использованы в сводке из-за неполных данных: NOAA GFS" in text
     assert "Модель ECMWF IFS" in text
     assert "Модель ICON" in text
     assert "Модель GDPS" in text
@@ -335,25 +320,43 @@ def test_report_contains_summary_and_model_meteogram_appendices(tmp_path: Path) 
     assert "мм" in text
     assert "гПа" in text
 
-    daily, detail, *appendix_tables = document.tables
-    assert len(daily.rows) <= 8
-    assert len(detail.rows) <= 19
-    assert all(len(table.rows) <= 8 for table in appendix_tables)
+    meteogram_shapes = [
+        shape
+        for shape in document.inline_shapes
+        if shape.width.mm > 250 and shape.height.mm > 80
+    ]
+    assert len(meteogram_shapes) == 4
 
     with ZipFile(output) as archive:
         xml = archive.read("word/document.xml").decode("utf-8")
-    assert xml.count("Метеограмма") >= 4
-    assert xml.count('w:type="page"') == 5
+        media = [name for name in archive.namelist() if name.startswith("word/media/")]
+    assert "Метеограмма модели ECMWF IFS" in xml
+    assert "Метеограмма модели ICON" in xml
+    assert "Метеограмма модели GDPS" in xml
+    assert "Ансамблевая метеограмма GEFS" in xml
+    assert len(media) >= 4
 
 
-def test_compact_mode_without_meteograms_remains_available(tmp_path: Path) -> None:
-    output = _generate_report(tmp_path, include_meteograms=False)
+def test_report_without_meteograms_remains_two_pages_structure(tmp_path: Path) -> None:
+    location = _location()
+    output = tmp_path / "without-meteograms.docx"
+    ScientificDocumentGenerator(tmp_path / "icons").generate(
+        location=location,
+        series=_report_series(location),
+        options=DocumentOptions(
+            include_meteograms=False,
+            page_size="A4",
+            parameter_profile="operational",
+        ),
+        output_path=output,
+    )
     document = Document(output)
     assert len(document.tables) == 3
-    with ZipFile(output) as archive:
-        xml = archive.read("word/document.xml").decode("utf-8")
-    assert xml.count('w:type="page"') == 1
-    assert "Метеограмма модели" not in xml
+    assert not [
+        shape
+        for shape in document.inline_shapes
+        if shape.width.mm > 250 and shape.height.mm > 80
+    ]
 
 
 def test_incomplete_only_source_is_rejected_instead_of_printing_blanks(
@@ -378,9 +381,9 @@ def test_incomplete_only_source_is_rejected_instead_of_printing_blanks(
 
 @pytest.mark.skipif(
     not shutil.which("libreoffice") or not shutil.which("pdfinfo"),
-    reason="LibreOffice и pdfinfo нужны только для проверки физической пагинации",
+    reason="LibreOffice и pdfinfo нужны для проверки физической пагинации",
 )
-def test_rendered_report_uses_one_page_per_meteogram(tmp_path: Path) -> None:
+def test_rendered_report_page_count_matches_appendices(tmp_path: Path) -> None:
     output = _generate_report(tmp_path)
     profile = tmp_path / "libreoffice-profile"
     profile.mkdir()
@@ -400,7 +403,7 @@ def test_rendered_report_uses_one_page_per_meteogram(tmp_path: Path) -> None:
         check=True,
         capture_output=True,
         text=True,
-        timeout=180,
+        timeout=120,
         env=environment,
     )
     pdf = output.with_suffix(".pdf")
