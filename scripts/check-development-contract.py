@@ -10,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_FILES = (
     "AGENTS.md",
+    "CLAUDE.md",
+    "GEMINI.md",
     "docs/DEVELOPMENT_CONTRACT.md",
     "docs/DEVELOPMENT.md",
     ".github/copilot-instructions.md",
@@ -28,6 +30,20 @@ REQUIRED_MARKERS: dict[str, tuple[str, ...]] = {
         "python scripts/check-development-contract.py",
         "PR остаётся черновиком",
         "После слияния повторно получить `main`",
+    ),
+    "CLAUDE.md": (
+        "AGENTS.md",
+        "docs/DEVELOPMENT_CONTRACT.md",
+        "актуальной `main`",
+        "python scripts/check-development-contract.py",
+        "после слияния повторно проверить `main`",
+    ),
+    "GEMINI.md": (
+        "AGENTS.md",
+        "docs/DEVELOPMENT_CONTRACT.md",
+        "актуальную `main`",
+        "python scripts/check-development-contract.py",
+        "после слияния повторно проверить `main`",
     ),
     "docs/DEVELOPMENT_CONTRACT.md": (
         "## 1. Источники истины",
