@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "weather-to-docx"
-version = "0.5.0"
+version = "0.5.1"
 description = "Профессиональные оперативные прогнозы, риски и метеограммы в DOCX"
 readme = "README.md"
 requires-python = ">=3.11"
