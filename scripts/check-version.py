@@ -19,6 +19,7 @@ def main() -> int:
     pyproject = tomllib.loads(read("pyproject.toml"))
     version = str(pyproject["project"]["version"]).strip()
     tag = f"v{version}"
+    release_document = f"docs/RELEASE_{version}.md"
     errors: list[str] = []
 
     def require_exact(path: str, expected: str) -> None:
@@ -57,8 +58,16 @@ def main() -> int:
     require_text("CHANGELOG.md", f"## {version} —")
     require_text("docs/METEOGRAMS.md", f"Версия {version}")
     require_text("docs/ACCEPTANCE.md", f"Weather to DOCX {version}")
+    require_text("docs/REMEDIATION_PLAN.md", f"Текущая версия {version}")
     require_text("docs/RELEASE_STATUS.md", f"Текущая версия исходного кода: **{version}**.")
     require_text("docs/RELEASE_NOTES.md", f"Текущий выпуск: Weather to DOCX {version}")
+    require_text("docs/RELEASE_NOTES.md", f"RELEASE_{version}.md")
+
+    release_path = ROOT / release_document
+    if not release_path.is_file():
+        errors.append(f"{release_document}: отсутствует документ текущего выпуска")
+    else:
+        require_text(release_document, f"Weather to DOCX {version}")
 
     models_text = read("src/weather_to_docx/domain/models.py")
     if "adapter_version: str = __version__" not in models_text:
