@@ -260,25 +260,26 @@ class ForecastBatchService:
                     }
                 )
 
-                preview = extract_primary_meteogram(path)
-                if preview is not None:
-                    preview_bytes, media_type = preview
-                    extension = ".png" if media_type == "image/png" else ".jpg"
-                    preview_path = batch_dir / (
-                        safe_filename(f"Метеограмма_{item.location.name}") + extension
-                    )
-                    preview_path.write_bytes(preview_bytes)
-                    result.artifacts.append(
-                        self._artifact(
-                            preview_path,
-                            "preview",
-                            item.location.id,
-                            metadata={
-                                "media_type": media_type,
-                                "source_document": path.name,
-                            },
+                if request.document.include_meteograms and inspection.ready:
+                    preview = extract_primary_meteogram(path)
+                    if preview is not None:
+                        preview_bytes, media_type = preview
+                        extension = ".png" if media_type == "image/png" else ".jpg"
+                        preview_path = batch_dir / (
+                            safe_filename(f"Метеограмма_{item.location.name}") + extension
                         )
-                    )
+                        preview_path.write_bytes(preview_bytes)
+                        result.artifacts.append(
+                            self._artifact(
+                                preview_path,
+                                "preview",
+                                item.location.id,
+                                metadata={
+                                    "media_type": media_type,
+                                    "source_document": path.name,
+                                },
+                            )
+                        )
 
                 for forecast in item.series:
                     source_manifest.append(
