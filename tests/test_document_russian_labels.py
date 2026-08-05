@@ -87,4 +87,4 @@ def test_visible_document_labels_are_russian(tmp_path: Path) -> None:
     assert "Europe/Moscow" not in text
     assert "UTC+03:00" in text
     assert "shape-preserving" not in text
-    assert "формосохраняющим методом PCHIP" in text
+    assert "формосохраняющим методом PCHIP" not in text
