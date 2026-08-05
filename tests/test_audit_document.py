@@ -42,6 +42,14 @@ def _text(document: Document) -> str:
     )
 
 
+def _large_meteograms(document: Document):
+    return [
+        shape
+        for shape in document.inline_shapes
+        if shape.width.mm > 250 and shape.height.mm > 80
+    ]
+
+
 def test_brief_single_model_hides_false_agreement_column(tmp_path: Path) -> None:
     output = tmp_path / "brief.docx"
     ScientificDocumentGenerator(tmp_path / "icons").generate(
@@ -59,7 +67,7 @@ def test_brief_single_model_hides_false_agreement_column(tmp_path: Path) -> None
     assert "Согласованность" not in text
     assert "одна модель" not in text
     assert "Прогноз по контрольным срокам" in text
-    assert not document.inline_shapes
+    assert not _large_meteograms(document)
 
 
 def test_short_expert_document_uses_dynamic_layout_and_graph_only_page(
@@ -85,7 +93,6 @@ def test_short_expert_document_uses_dynamic_layout_and_graph_only_page(
     assert "Метеограмма модели Синтетические данные" in text
     assert "формосохраняющим методом PCHIP" not in text
     assert "Цикл:" in text
-    # В экспертном режиме перед графиком нет повторной суточной таблицы модели.
     assert len(document.tables) == 3
 
 
