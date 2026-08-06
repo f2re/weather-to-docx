@@ -31,6 +31,7 @@ from weather_to_docx.document.impact_labels import (
     daily_wind_text,
 )
 from weather_to_docx.document.russian_labels import apply_russian_display_names
+from weather_to_docx.document.source_names import source_display_name
 from weather_to_docx.domain.models import ForecastSeries
 from weather_to_docx.plotting.meteogram import _values
 from weather_to_docx.plotting.professional_meteogram import WIND_ARROWS
@@ -91,7 +92,7 @@ class DocumentMeteogramRenderer(SemanticMeteogramRenderer):
 
     @staticmethod
     def _complete_title(forecast: ForecastSeries, title: str | None) -> str:
-        base = title or forecast.source.model
+        base = title or source_display_name(forecast)
         if not forecast.points:
             return f"{forecast.location.name} · {base}"
         start = forecast.points[0].valid_time_local
@@ -184,10 +185,12 @@ def _translated_chart_note(document: Document, text: str) -> None:
 
 
 apply_russian_display_names()
+_compact_generator._short_model_name = source_display_name
 _compact_generator._consensus_point = consistent_control_point
 _compact_generator._detail_precipitation_text = detail_precipitation_text
 _compact_generator._detail_wind_text = detail_wind_text
 _compact_generator._shade_daily_hazard = shade_daily_hazard
+_audit_generator._short_model_name = source_display_name
 _audit_generator.ProfessionalMeteogramRenderer = DocumentMeteogramRenderer
 _audit_generator.build_risk_signals = build_consistent_risk_signals
 _audit_generator._daily_model_metrics = consistent_daily_model_metrics
