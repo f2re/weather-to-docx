@@ -4,8 +4,13 @@ import math
 import statistics
 from collections import Counter
 
+from weather_to_docx.analysis.semantic_policy import strict_majority
 from weather_to_docx.document.compact_generator import DailyModelMetrics
-from weather_to_docx.document.styles import DANGER, WARNING, set_cell_shading
+from weather_to_docx.document.styles import (
+    DANGER,
+    WARNING,
+    set_cell_shading,
+)
 from weather_to_docx.document.weather_rules import (
     SUMMARY_HEAVY_PRECIPITATION,
     SUMMARY_LIGHT_PRECIPITATION,
@@ -68,20 +73,20 @@ def detail_precipitation_text(points: list[ForecastPoint]) -> str:
         return "нет"
 
     model_count = len(values)
-    required = _majority(model_count)
+    required = strict_majority(model_count)
     median = statistics.median(values)
     low = min(values)
     high = max(values)
     if wet_count < required:
         return (
-            f"осадки возможны\n{wet_count}/{model_count} моделей; "
+            f"осадки возможны\n{wet_count}/{model_count} моделей с данными; "
             f"до {_fmt(high)} мм"
         )
 
     lines = [f"медиана {_fmt(median)} мм"]
     if high - low >= max(0.2, median * 0.5):
         lines.append(f"диапазон {_fmt(low)}–{_fmt(high)} мм")
-    lines.append(f"осадки: {wet_count}/{model_count} моделей")
+    lines.append(f"осадки: {wet_count}/{model_count} моделей с данными")
     return "\n".join(lines)
 
 
@@ -110,12 +115,14 @@ def detail_wind_text(points: list[ForecastPoint]) -> str:
     return "\n".join(lines)
 
 
-def shade_daily_hazard(cells, metrics: list[DailyModelMetrics]) -> None:
-    """Окрашивать сутки только при подтверждении большинством моделей."""
+def shade_daily_hazard(
+    cells,
+    metrics: list[DailyModelMetrics],
+) -> None:
+    """Окрашивать сутки только при строгом большинстве моделей с данными."""
 
     if not metrics:
         return
-    required = _majority(len(metrics))
     totals = [
         item.precipitation_total
         for item in metrics
@@ -134,14 +141,14 @@ def shade_daily_hazard(cells, metrics: list[DailyModelMetrics]) -> None:
     ]
 
     dangerous = (
-        sum(value >= 30.0 for value in totals) >= required
-        or sum(value >= 20.0 for value in gusts) >= required
+        _supported(totals, lambda value: value >= 30.0)
+        or _supported(gusts, lambda value: value >= 20.0)
     )
     warning = (
-        sum(value >= 15.0 for value in totals) >= required
-        or sum(value >= 14.0 for value in gusts) >= required
-        or sum(value >= 35.0 for value in highs) >= required
-        or sum(value <= -25.0 for value in lows) >= required
+        _supported(totals, lambda value: value >= 15.0)
+        or _supported(gusts, lambda value: value >= 14.0)
+        or _supported(highs, lambda value: value >= 35.0)
+        or _supported(lows, lambda value: value <= -25.0)
     )
     if dangerous:
         for cell in cells:
@@ -152,10 +159,22 @@ def shade_daily_hazard(cells, metrics: list[DailyModelMetrics]) -> None:
 
 
 def _control_weather_code(points: list[ForecastPoint]) -> int:
-    model_count = len(points)
-    required = _majority(model_count)
-    precipitation = [_number(point.raw("precipitation")) or 0.0 for point in points]
-    wet_indices = [index for index, value in enumerate(precipitation) if value >= 0.1]
+    precipitation = [
+        _number(point.raw("precipitation"))
+        for point in points
+    ]
+    available_indices = [
+        index for index, value in enumerate(precipitation) if value is not None
+    ]
+    if not available_indices:
+        return _dry_control_code(points)
+
+    wet_indices = [
+        index
+        for index in available_indices
+        if (precipitation[index] or 0.0) >= 0.1
+    ]
+    required = strict_majority(len(available_indices))
     if not wet_indices:
         return _dry_control_code(points)
     if len(wet_indices) < required:
@@ -166,15 +185,22 @@ def _control_weather_code(points: list[ForecastPoint]) -> int:
     if sum(code in THUNDER_CODES for code in codes) >= required:
         return SUMMARY_THUNDERSTORM
     if sum(code in SNOW_CODES for code in codes) >= required:
-        median_rate = statistics.median(_precipitation_rate(point) for point in points)
+        median_rate = statistics.median(
+            _precipitation_rate(point) for point in wet_points
+        )
         return 75 if median_rate >= 5.0 else 73 if median_rate >= 0.5 else 71
     if sum(code in FREEZING_CODES for code in codes) >= required:
-        median_rate = statistics.median(_precipitation_rate(point) for point in points)
+        median_rate = statistics.median(
+            _precipitation_rate(point) for point in wet_points
+        )
         return 67 if median_rate >= 5.0 else 66
 
-    rates = [_precipitation_rate(point) for point in points]
+    rates = [_precipitation_rate(point) for point in wet_points]
     median_rate = statistics.median(rates)
-    if sum(code in DRIZZLE_CODES for code in codes) >= required and median_rate < 0.5:
+    if (
+        sum(code in DRIZZLE_CODES for code in codes) >= required
+        and median_rate < 0.5
+    ):
         return 53
     if median_rate >= 5.0:
         return SUMMARY_HEAVY_PRECIPITATION
@@ -185,7 +211,11 @@ def _control_weather_code(points: list[ForecastPoint]) -> int:
 
 def _dry_control_code(points: list[ForecastPoint]) -> int:
     visibility = _values(points, "visibility")
-    if visibility and sum(value < 1000 for value in visibility) >= _majority(len(points)):
+    if (
+        visibility
+        and sum(value < 1000 for value in visibility)
+        >= strict_majority(len(visibility))
+    ):
         return 45
     cloud = _values(points, "cloud_cover")
     if not cloud:
@@ -235,7 +265,9 @@ def _circular_mean(values: list[float]) -> tuple[float | None, float]:
 def _stable_mode(codes: list[int]) -> int:
     counts = Counter(codes)
     best = max(counts.values())
-    candidates = sorted(code for code, count in counts.items() if count == best)
+    candidates = sorted(
+        code for code, count in counts.items() if count == best
+    )
     return candidates[(len(candidates) - 1) // 2]
 
 
@@ -248,12 +280,25 @@ def _values(points: list[ForecastPoint], code: str) -> list[float]:
     return values
 
 
+def _supported(values: list[float], predicate) -> bool:
+    if not values:
+        return False
+    return (
+        sum(predicate(value) for value in values)
+        >= strict_majority(len(values))
+    )
+
+
 def _number(value) -> float | None:
     try:
         number = float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
-    return number if number is not None and math.isfinite(number) else None
+    return (
+        number
+        if number is not None and math.isfinite(number)
+        else None
+    )
 
 
 def _fmt(value: float, precision: int = 1) -> str:
@@ -261,4 +306,6 @@ def _fmt(value: float, precision: int = 1) -> str:
 
 
 def _majority(model_count: int) -> int:
-    return 1 if model_count <= 1 else max(2, math.ceil(model_count / 2))
+    """Backward-compatible name for the strict-majority policy."""
+
+    return strict_majority(model_count)

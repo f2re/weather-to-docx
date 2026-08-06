@@ -11,7 +11,16 @@ from weather_to_docx.analysis.impact_scales import (
     daily_precipitation_summary,
     temperature_impact_label,
 )
-from weather_to_docx.document.compact_generator import DailyModelMetrics
+from weather_to_docx.analysis.semantic_policy import (
+    strict_majority,
+    support_assessment,
+)
+from weather_to_docx.document.compact_generator import (
+    AGREEMENT_HIGH,
+    AGREEMENT_LOW,
+    AGREEMENT_MEDIUM,
+    DailyModelMetrics,
+)
 from weather_to_docx.document.weather_rules import (
     SUMMARY_HEAVY_PRECIPITATION,
     SUMMARY_LIGHT_PRECIPITATION,
@@ -110,15 +119,16 @@ def daily_wind_text(metrics: list[DailyModelMetrics]) -> str:
     if not winds:
         return "нет данных"
 
-    model_count = len(metrics)
-    required = _majority(model_count)
+    wind_available = len(winds)
+    wind_required = strict_majority(wind_available)
     median_wind = statistics.median(winds)
     lines = [f"до {median_wind:.1f} м/с".replace(".", ",")]
 
     if gusts:
         median_gust = statistics.median(gusts)
-        gust_text = f"порывы: медиана {median_gust:.1f} м/с"
-        lines.append(gust_text.replace(".", ","))
+        lines.append(
+            f"порывы: медиана {median_gust:.1f} м/с".replace(".", ",")
+        )
         if max(gusts) - min(gusts) >= 3.0:
             spread = f"{min(gusts):.1f}–{max(gusts):.1f}".replace(".", ",")
             lines.append(f"по моделям {spread} м/с")
@@ -127,20 +137,24 @@ def daily_wind_text(metrics: list[DailyModelMetrics]) -> str:
     strong_gusts = sum(value >= 14.0 for value in gusts)
     strong_wind = sum(value >= 10.0 for value in winds)
     breezy = sum(value >= 5.0 for value in winds)
+    gust_required = strict_majority(len(gusts)) if gusts else 1
 
-    if dangerous_gusts >= required:
+    if gusts and dangerous_gusts >= gust_required:
         lines.append("опасные порывы")
-    elif strong_gusts >= required:
+    elif gusts and strong_gusts >= gust_required:
         lines.append("сильные порывы")
-    elif strong_wind >= required:
+    elif strong_wind >= wind_required:
         lines.append("сильный ветер")
-    elif breezy >= required:
+    elif breezy >= wind_required:
         lines.append("ветрено")
     elif strong_gusts:
         lines.append(
-            f"порывы ≥14 м/с: {strong_gusts}/{model_count} моделей"
+            f"порывы ≥14 м/с: {strong_gusts}/{len(gusts)} моделей с данными"
         )
 
+    missing = len(metrics) - max(len(winds), len(gusts))
+    if missing > 0:
+        lines.append(f"нет данных: {missing}/{len(metrics)} моделей")
     return "\n".join(lines)
 
 
@@ -154,15 +168,66 @@ def daily_pressure_text(metrics: list[DailyModelMetrics]) -> str:
     if not lows or not highs:
         return "нет данных"
 
-    low = min(lows)
-    high = max(highs)
-    text = f"{low:.0f}–{high:.0f} гПа"
-    required = _majority(len(metrics))
+    central_low = statistics.median(lows)
+    central_high = statistics.median(highs)
+    lines = [f"{central_low:.0f}–{central_high:.0f} гПа"]
+
+    envelope_low = min(lows)
+    envelope_high = max(highs)
+    if (
+        abs(envelope_low - central_low) >= 2.0
+        or abs(envelope_high - central_high) >= 2.0
+    ):
+        lines.append(
+            f"по моделям {envelope_low:.0f}–{envelope_high:.0f} гПа"
+        )
+
+    required = strict_majority(min(len(lows), len(highs)))
     if sum(value < 990 for value in lows) >= required:
-        return f"{text}\nнизкое"
-    if sum(value > 1030 for value in highs) >= required:
-        return f"{text}\nвысокое"
-    return text
+        lines.append("низкое")
+    elif sum(value > 1030 for value in highs) >= required:
+        lines.append("высокое")
+
+    missing = len(metrics) - min(len(lows), len(highs))
+    if missing > 0:
+        lines.append(f"нет данных: {missing}/{len(metrics)} моделей")
+    return "\n".join(lines)
+
+
+def daily_precipitation_metrics_text(
+    metrics: list[DailyModelMetrics],
+) -> str:
+    """Compatibility text for the compact generator from prepared metrics."""
+
+    totals = [
+        item.precipitation_total
+        for item in metrics
+        if item.precipitation_total is not None
+    ]
+    if not totals:
+        return "нет данных"
+
+    wet_count = sum(total >= 0.1 for total in totals)
+    if wet_count == 0:
+        text = "без осадков"
+    else:
+        median_total = statistics.median(totals)
+        text = "\n".join(
+            (
+                _precipitation_amount_text(
+                    median_total,
+                    min(totals),
+                    max(totals),
+                ),
+                f"осадки: {wet_count}/{len(totals)} моделей с данными",
+            )
+        )
+    missing = len(metrics) - len(totals)
+    return (
+        f"{text}\nнет данных: {missing}/{len(metrics)} моделей"
+        if missing > 0
+        else text
+    )
 
 
 def daily_precipitation_text(
@@ -177,34 +242,96 @@ def daily_precipitation_text(
     if not summaries:
         return "нет данных"
 
-    model_count = len(summaries)
-    required = _majority(model_count)
+    selected_count = len(forecasts)
+    available_count = len(summaries)
+    required = strict_majority(available_count)
     totals = [summary.total_mm for summary in summaries]
     wet_count = sum(total >= 0.1 for total in totals)
     if wet_count == 0:
-        return "без осадков"
+        lines = ["без осадков"]
+    else:
+        median_total = statistics.median(totals)
+        lines = [
+            _precipitation_amount_text(
+                median_total,
+                min(totals),
+                max(totals),
+            ),
+            _consensus_precipitation_label(
+                summaries,
+                wet_count=wet_count,
+                required=required,
+                median_total=median_total,
+            ),
+            f"осадки: {wet_count}/{available_count} моделей с данными",
+        ]
 
-    median_total = statistics.median(totals)
-    lines = [
-        _precipitation_amount_text(median_total, min(totals), max(totals)),
-        _consensus_precipitation_label(
-            summaries,
-            wet_count=wet_count,
-            required=required,
-            median_total=median_total,
-        ),
-        f"осадки: {wet_count}/{model_count} моделей",
-    ]
+        thunder_count = sum(summary.thunder for summary in summaries)
+        drizzle_count = sum(summary.persistent_drizzle for summary in summaries)
+        if 0 < thunder_count < required:
+            lines.append(
+                f"гроза: {thunder_count}/{available_count} моделей"
+            )
+        if 0 < drizzle_count < required:
+            lines.append(
+                "длительная морось: "
+                f"{drizzle_count}/{available_count} моделей"
+            )
 
-    thunder_count = sum(summary.thunder for summary in summaries)
-    drizzle_count = sum(summary.persistent_drizzle for summary in summaries)
-    if 0 < thunder_count < required:
-        lines.append(f"гроза: {thunder_count}/{model_count} моделей")
-    if 0 < drizzle_count < required:
-        lines.append(
-            f"длительная морось: {drizzle_count}/{model_count} моделей"
-        )
+    missing = selected_count - available_count
+    if missing > 0:
+        lines.append(f"нет данных об осадках: {missing}/{selected_count} моделей")
     return "\n".join(lines)
+
+
+def daily_agreement_from_metrics(
+    metrics: list[DailyModelMetrics],
+) -> tuple[str, str]:
+    if len(metrics) <= 1:
+        return "не оценивается", AGREEMENT_MEDIUM
+
+    highs = [
+        item.temperature_max
+        for item in metrics
+        if item.temperature_max is not None
+    ]
+    totals = [
+        item.precipitation_total
+        for item in metrics
+        if item.precipitation_total is not None
+    ]
+    codes = [item.weather_code for item in metrics]
+    weather_ratio = max(Counter(codes).values()) / len(codes)
+    temperature_spread = max(highs) - min(highs) if len(highs) >= 2 else 0.0
+    wet = [value >= 0.1 for value in totals]
+    precipitation_agrees = len(wet) >= 2 and (all(wet) or not any(wet))
+
+    if (
+        weather_ratio >= 0.67
+        and temperature_spread <= 2.5
+        and precipitation_agrees
+    ):
+        return "высокая", AGREEMENT_HIGH
+    if weather_ratio >= 0.5 and temperature_spread <= 4.5:
+        return "средняя", AGREEMENT_MEDIUM
+    return "низкая", AGREEMENT_LOW
+
+
+def build_highlights(
+    forecasts: list[ForecastSeries],
+    report_dates: list[date],
+    maximum: int,
+) -> list[str]:
+    signals = build_consistent_risk_signals(
+        forecasts,
+        [],
+        report_dates,
+        maximum=maximum,
+    )
+    return [
+        f"{signal.phenomenon.lower()} {signal.day:%d.%m}: {signal.value_text}"
+        for signal in signals
+    ]
 
 
 def build_consistent_risk_signals(
@@ -214,14 +341,12 @@ def build_consistent_risk_signals(
     *,
     maximum: int = 3,
 ) -> list[RiskSignal]:
-    """Строить ключевые риски только по подтверждённым сценариям."""
+    """Строить риски по количественным данным и строгому большинству."""
 
     del ensembles
     signals: list[RiskSignal] = []
-    model_count = len(forecasts)
-    if not model_count:
+    if not forecasts:
         return signals
-    required = _majority(model_count)
 
     for day in report_dates:
         model_data = []
@@ -233,7 +358,12 @@ def build_consistent_risk_signals(
         if not model_data:
             continue
 
-        thunder = [item for item in model_data if item[2] and item[2].thunder]
+        available_models = len(model_data)
+        required = strict_majority(available_models)
+
+        thunder = [
+            item for item in model_data if item[2] and item[2].thunder
+        ]
         if len(thunder) >= required:
             points = [
                 point
@@ -247,17 +377,23 @@ def build_consistent_risk_signals(
                     day=day,
                     points=points,
                     value_text=(
-                        f"подтверждают {len(thunder)} из {model_count} моделей"
+                        f"подтверждают {len(thunder)} из "
+                        f"{available_models} моделей с данными"
                     ),
                     support_count=len(thunder),
-                    model_count=model_count,
+                    model_count=available_models,
                     severity=90,
                 )
             )
 
-        precipitation = [item for item in model_data if item[2] is not None]
-        summaries = [item[2] for item in precipitation if item[2] is not None]
+        precipitation = [
+            item for item in model_data if item[2] is not None
+        ]
+        summaries = [
+            item[2] for item in precipitation if item[2] is not None
+        ]
         if summaries:
+            precipitation_required = strict_majority(len(summaries))
             totals = [summary.total_mm for summary in summaries]
             median_total = statistics.median(totals)
             strong = [
@@ -269,10 +405,15 @@ def build_consistent_risk_signals(
                     or item[2].maximum_rate_mm_h >= 5.0
                 )
             ]
-            if len(strong) >= required and median_total >= 15.0:
+            if (
+                len(strong) >= precipitation_required
+                and median_total >= 15.0
+            ):
                 representative = min(
                     strong,
-                    key=lambda item: abs(item[2].total_mm - median_total),
+                    key=lambda item: abs(
+                        item[2].total_mm - median_total
+                    ),
                 )
                 signals.append(
                     _risk_signal(
@@ -285,7 +426,7 @@ def build_consistent_risk_signals(
                             max(totals),
                         ),
                         support_count=len(strong),
-                        model_count=model_count,
+                        model_count=len(summaries),
                         severity=85 if median_total < 30 else 95,
                         peak_code="precipitation",
                     )
@@ -296,7 +437,14 @@ def build_consistent_risk_signals(
             gust = _maximum(points, "wind_gusts_10m")
             if gust is not None and gust >= 14.0:
                 gust_data.append((forecast, points, gust))
-        if len(gust_data) >= required:
+        gust_available = sum(
+            _maximum(points, "wind_gusts_10m") is not None
+            for _, points, _ in model_data
+        )
+        if (
+            gust_available > 0
+            and len(gust_data) >= strict_majority(gust_available)
+        ):
             median_gust = statistics.median(item[2] for item in gust_data)
             representative = min(
                 gust_data,
@@ -311,7 +459,7 @@ def build_consistent_risk_signals(
                         f"медиана {median_gust:.1f} м/с".replace(".", ",")
                     ),
                     support_count=len(gust_data),
-                    model_count=model_count,
+                    model_count=gust_available,
                     severity=90 if median_gust >= 20 else 72,
                     peak_code="wind_gusts_10m",
                 )
@@ -319,14 +467,27 @@ def build_consistent_risk_signals(
 
         heat = []
         cold = []
+        temperature_available = 0
         for forecast, points, _ in model_data:
             maximum_temperature = _maximum(points, "temperature_2m")
             minimum_temperature = _minimum(points, "temperature_2m")
-            if maximum_temperature is not None and maximum_temperature >= 30.0:
+            if maximum_temperature is not None or minimum_temperature is not None:
+                temperature_available += 1
+            if (
+                maximum_temperature is not None
+                and maximum_temperature >= 30.0
+            ):
                 heat.append((forecast, points, maximum_temperature))
-            if minimum_temperature is not None and minimum_temperature <= -15.0:
+            if (
+                minimum_temperature is not None
+                and minimum_temperature <= -15.0
+            ):
                 cold.append((forecast, points, minimum_temperature))
-        if len(heat) >= required:
+
+        if (
+            temperature_available > 0
+            and len(heat) >= strict_majority(temperature_available)
+        ):
             median_heat = statistics.median(item[2] for item in heat)
             representative = min(
                 heat,
@@ -341,12 +502,15 @@ def build_consistent_risk_signals(
                         f"медиана {median_heat:.1f} °C".replace(".", ",")
                     ),
                     support_count=len(heat),
-                    model_count=model_count,
+                    model_count=temperature_available,
                     severity=68,
                     peak_code="temperature_2m",
                 )
             )
-        if len(cold) >= required:
+        if (
+            temperature_available > 0
+            and len(cold) >= strict_majority(temperature_available)
+        ):
             median_cold = statistics.median(item[2] for item in cold)
             representative = min(
                 cold,
@@ -361,7 +525,7 @@ def build_consistent_risk_signals(
                         f"медиана {median_cold:.1f} °C".replace(".", ",")
                     ),
                     support_count=len(cold),
-                    model_count=model_count,
+                    model_count=temperature_available,
                     severity=68,
                     peak_code="temperature_2m",
                     minimum_peak=True,
@@ -404,13 +568,20 @@ def _consensus_weather_code(metrics: list[DailyModelMetrics]) -> int:
     if len(metrics) == 1:
         return metrics[0].weather_code
 
-    required = _majority(len(metrics))
     wet = [
         item
         for item in metrics
         if item.precipitation_total is not None
         and item.precipitation_total >= 0.1
     ]
+    available = [
+        item
+        for item in metrics
+        if item.precipitation_total is not None
+    ]
+    if not available:
+        return _stable_mode([item.weather_code for item in metrics])
+    required = strict_majority(len(available))
     if not wet:
         return _stable_mode([item.weather_code for item in metrics])
     if len(wet) < required:
@@ -419,7 +590,7 @@ def _consensus_weather_code(metrics: list[DailyModelMetrics]) -> int:
     if sum(item.weather_code in THUNDER_CODES for item in wet) >= required:
         return SUMMARY_THUNDERSTORM
 
-    totals = [item.precipitation_total or 0.0 for item in metrics]
+    totals = [item.precipitation_total or 0.0 for item in available]
     median_total = statistics.median(totals)
     heavy_count = sum(
         item.weather_code in HEAVY_PRECIPITATION_CODES
@@ -445,17 +616,19 @@ def _consensus_precipitation_label(
 ) -> str:
     if wet_count < required:
         return "осадки возможны"
-
     if sum(summary.thunder for summary in summaries) >= required:
         return "гроза с осадками"
-    if sum(summary.persistent_drizzle for summary in summaries) >= required:
-        return "длительная морось"
     if median_total >= 30.0:
         return "очень много осадков"
     if median_total >= 15.0:
         return "много осадков"
     if median_total >= 5.0:
         return "заметные осадки"
+    if (
+        sum(summary.persistent_drizzle for summary in summaries) >= required
+        and median_total < 5.0
+    ):
+        return "длительная морось"
     if median_total >= 1.0:
         return "небольшие осадки"
     return "слабые осадки"
@@ -473,7 +646,11 @@ def _precipitation_amount_text(median: float, low: float, high: float) -> str:
     )
 
 
-def _risk_precipitation_value(median: float, low: float, high: float) -> str:
+def _risk_precipitation_value(
+    median: float,
+    low: float,
+    high: float,
+) -> str:
     median_text = f"{median:.1f}".replace(".", ",")
     low_text = f"{low:.1f}".replace(".", ",")
     high_text = f"{high:.1f}".replace(".", ",")
@@ -495,14 +672,7 @@ def _risk_signal(
     peak_code: str | None = None,
     minimum_peak: bool = False,
 ) -> RiskSignal:
-    support_ratio = support_count / max(1, model_count)
-    if support_ratio >= 0.67:
-        scenario = "Устойчивый сигнал"
-        confidence = "высокая"
-    else:
-        scenario = "Вероятный сигнал"
-        confidence = "средняя"
-
+    assessment = support_assessment(support_count, model_count)
     ordered = sorted(points, key=lambda point: point.valid_time_local)
     peak = None
     if peak_code:
@@ -522,8 +692,8 @@ def _risk_signal(
 
     return RiskSignal(
         phenomenon=phenomenon,
-        scenario=scenario,
-        confidence=confidence,
+        scenario=assessment.scenario,
+        confidence=assessment.confidence,
         day=day,
         start_local=ordered[0].valid_time_local if ordered else None,
         end_local=ordered[-1].valid_time_local if ordered else None,
@@ -564,7 +734,10 @@ def _stable_mode(codes: list[int]) -> int:
     return candidates[(len(candidates) - 1) // 2]
 
 
-def _points_for_day(forecast: ForecastSeries, day: date) -> list[ForecastPoint]:
+def _points_for_day(
+    forecast: ForecastSeries,
+    day: date,
+) -> list[ForecastPoint]:
     return [
         point
         for point in forecast.points
@@ -600,8 +773,28 @@ def _number(value) -> float | None:
         number = float(value) if value is not None else None
     except (TypeError, ValueError):
         return None
-    return number if number is not None and math.isfinite(number) else None
+    return (
+        number
+        if number is not None and math.isfinite(number)
+        else None
+    )
 
 
 def _majority(model_count: int) -> int:
-    return 1 if model_count <= 1 else max(2, math.ceil(model_count / 2))
+    """Backward-compatible name for the strict-majority policy."""
+
+    return strict_majority(model_count)
+
+
+__all__ = [
+    "build_consistent_risk_signals",
+    "build_highlights",
+    "consistent_daily_model_metrics",
+    "consistent_daily_presentation_point",
+    "daily_agreement_from_metrics",
+    "daily_precipitation_metrics_text",
+    "daily_precipitation_text",
+    "daily_pressure_text",
+    "daily_temperature_text",
+    "daily_wind_text",
+]

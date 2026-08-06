@@ -15,7 +15,7 @@ from weather_to_docx.sources.ensemble_catalog import (
 from weather_to_docx.sources.ensemble_enhancements import (
     install_ensemble_statistics_enhancements,
 )
-from weather_to_docx.sources.gfs_nomads import GfsNomadsSource
+from weather_to_docx.sources.gfs_operational import GfsNomadsSource
 from weather_to_docx.sources.open_meteo import (
     OpenMeteoDwdIconGlobalSource,
     OpenMeteoEcmwfAifsSource,
