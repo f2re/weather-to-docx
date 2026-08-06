@@ -15,7 +15,6 @@ from weather_to_docx.domain.models import ForecastPoint, ForecastSeries
 from weather_to_docx.plotting.meteogram import (
     FONT_FAMILY,
     _bar_width,
-    _combined_legend,
     _ensemble_centre,
     _probability_codes,
     _stat_values,
@@ -106,19 +105,19 @@ class ProfessionalMeteogramRenderer(RussianMeteogramRenderer):
         figure, axes = plt.subplots(
             5,
             1,
-            figsize=(11.4, 5.55),
+            figsize=(11.4, 7.05),
             dpi=self.dpi,
             sharex=True,
             gridspec_kw={
-                "height_ratios": (0.85, 1.55, 0.72, 0.9, 1.35),
-                "hspace": 0.08,
+                "height_ratios": (0.9, 1.55, 0.82, 1.35, 1.45),
+                "hspace": 0.42,
             },
         )
         figure.patch.set_facecolor("white")
         figure.suptitle(
             title,
             x=0.065,
-            y=0.988,
+            y=0.992,
             ha="left",
             fontsize=12.5,
             fontweight="bold",
@@ -129,6 +128,60 @@ class ProfessionalMeteogramRenderer(RussianMeteogramRenderer):
             axis.spines[["top", "right"]].set_visible(False)
             axis.tick_params(labelsize=8, length=2.5)
         return figure, tuple(axes)
+
+    def _legend_above(
+        self,
+        axis: Axes,
+        *,
+        handles=None,
+        labels=None,
+        ncol: int = 3,
+        fontsize: float = 7.0,
+        anchor_y: float = 1.025,
+    ):
+        if handles is None or labels is None:
+            handles, labels = axis.get_legend_handles_labels()
+        if not handles:
+            return None
+        legend = axis.legend(
+            handles,
+            labels,
+            loc="lower left",
+            bbox_to_anchor=(0.0, anchor_y),
+            borderaxespad=0.0,
+            fontsize=fontsize,
+            frameon=True,
+            facecolor="white",
+            edgecolor="none",
+            framealpha=0.96,
+            ncol=max(1, min(ncol, len(handles))),
+            handlelength=1.5,
+            columnspacing=1.0,
+            handletextpad=0.45,
+            borderpad=0.25,
+        )
+        legend.set_zorder(30)
+        return legend
+
+    def _combined_legend_above(
+        self,
+        left_axis: Axes,
+        right_axis: Axes,
+        *,
+        ncol: int = 4,
+        fontsize: float = 6.7,
+        anchor_y: float = 1.025,
+    ):
+        left_handles, left_labels = left_axis.get_legend_handles_labels()
+        right_handles, right_labels = right_axis.get_legend_handles_labels()
+        return self._legend_above(
+            left_axis,
+            handles=left_handles + right_handles,
+            labels=left_labels + right_labels,
+            ncol=ncol,
+            fontsize=fontsize,
+            anchor_y=anchor_y,
+        )
 
     def _plot_cloud_bands(
         self,
@@ -179,13 +232,15 @@ class ProfessionalMeteogramRenderer(RussianMeteogramRenderer):
         axis.set_yticks((0.5, 1.5, 2.5), labels=("низкие", "средние", "высокие"))
         axis.tick_params(axis="y", labelsize=7.3)
         axis.text(
-            0.004,
-            0.95,
+            0.0,
+            1.025,
             "облачность, %",
             transform=axis.transAxes,
-            va="top",
+            va="bottom",
+            ha="left",
             fontsize=7.5,
             fontweight="bold",
+            clip_on=False,
         )
 
     def _plot_temperature(
@@ -228,8 +283,15 @@ class ProfessionalMeteogramRenderer(RussianMeteogramRenderer):
                 )
         axis.axhline(0, color="#7b8790", linewidth=0.75, alpha=0.7)
         axis.set_ylabel("°C", fontsize=8, rotation=0, labelpad=13)
-        axis.legend(loc="upper left", fontsize=7.5, frameon=False, ncol=3)
-        self._mark_extrema(axis, x, _ensemble_centre(forecast, "temperature_2m") if ensemble else _values(forecast, "temperature_2m"), "°C")
+        self._legend_above(axis, ncol=3, fontsize=7.2)
+        self._mark_extrema(
+            axis,
+            x,
+            _ensemble_centre(forecast, "temperature_2m")
+            if ensemble
+            else _values(forecast, "temperature_2m"),
+            "°C",
+        )
 
     def _plot_humidity(
         self,
@@ -239,20 +301,51 @@ class ProfessionalMeteogramRenderer(RussianMeteogramRenderer):
         *,
         ensemble: bool,
     ) -> None:
-        humidity = _ensemble_centre(forecast, "relative_humidity_2m") if ensemble else _values(forecast, "relative_humidity_2m")
+        humidity = (
+            _ensemble_centre(forecast, "relative_humidity_2m")
+            if ensemble
+            else _values(forecast, "relative_humidity_2m")
+        )
         if ensemble:
             p10 = _stat_values(forecast, "relative_humidity_2m", "p10")
             p90 = _stat_values(forecast, "relative_humidity_2m", "p90")
             p25 = _stat_values(forecast, "relative_humidity_2m", "p25")
             p75 = _stat_values(forecast, "relative_humidity_2m", "p75")
-            self._band(axis, x, p10, p90, self.palette.humidity_band, 0.18, lower_bound=0, upper_bound=100)
-            self._band(axis, x, p25, p75, self.palette.humidity, 0.15, lower_bound=0, upper_bound=100)
-        self._fill_smoothed(axis, x, humidity, 0, self.palette.humidity_band, 0.14, lower=0, upper=100)
+            self._band(
+                axis,
+                x,
+                p10,
+                p90,
+                self.palette.humidity_band,
+                0.18,
+                lower_bound=0,
+                upper_bound=100,
+            )
+            self._band(
+                axis,
+                x,
+                p25,
+                p75,
+                self.palette.humidity,
+                0.15,
+                lower_bound=0,
+                upper_bound=100,
+            )
+        self._fill_smoothed(
+            axis,
+            x,
+            humidity,
+            0,
+            self.palette.humidity_band,
+            0.14,
+            lower=0,
+            upper=100,
+        )
         self._line_smoothed(axis, x, humidity, self.palette.humidity, 1.35, "влажность")
         axis.set_ylim(0, 100)
         axis.set_yticks((0, 50, 100), labels=("0", "50", "100"))
         axis.set_ylabel("%", fontsize=8, rotation=0, labelpad=13)
-        axis.legend(loc="upper left", fontsize=7.5, frameon=False)
+        self._legend_above(axis, ncol=2, fontsize=7.2)
 
     def _plot_precipitation(
         self,
@@ -262,7 +355,11 @@ class ProfessionalMeteogramRenderer(RussianMeteogramRenderer):
         *,
         ensemble: bool,
     ) -> None:
-        precipitation = _ensemble_centre(forecast, "precipitation") if ensemble else _values(forecast, "precipitation")
+        precipitation = (
+            _ensemble_centre(forecast, "precipitation")
+            if ensemble
+            else _values(forecast, "precipitation")
+        )
         axis.bar(
             x,
             np.nan_to_num(precipitation, nan=0.0),
@@ -291,21 +388,29 @@ class ProfessionalMeteogramRenderer(RussianMeteogramRenderer):
             probability_axis.set_ylim(0, 100)
             probability_axis.set_ylabel("%", fontsize=8, rotation=0, labelpad=12)
             probability_axis.tick_params(axis="y", labelsize=7)
-            _combined_legend(axis, probability_axis, loc="upper left")
+            self._combined_legend_above(
+                axis,
+                probability_axis,
+                ncol=5,
+                fontsize=6.5,
+                anchor_y=1.04,
+            )
         else:
-            axis.legend(loc="upper left", fontsize=7.5, frameon=False)
+            self._legend_above(axis, ncol=2, fontsize=7.2)
         values = np.nan_to_num(precipitation, nan=0.0)
         if values.size and values.max() >= 0.1:
             index = int(np.argmax(values))
             axis.annotate(
                 f"{values[index]:.1f} мм".replace(".", ","),
                 (x[index], values[index]),
-                xytext=(0, 8),
+                xytext=(0, 7),
                 textcoords="offset points",
                 ha="center",
-                fontsize=7.2,
+                fontsize=7.0,
                 fontweight="bold",
                 color=self.palette.precipitation,
+                bbox={"boxstyle": "round,pad=0.16", "fc": "white", "ec": "none", "alpha": 0.92},
+                zorder=20,
             )
 
     def _plot_wind_pressure(
@@ -316,7 +421,11 @@ class ProfessionalMeteogramRenderer(RussianMeteogramRenderer):
         *,
         ensemble: bool,
     ) -> None:
-        wind = _ensemble_centre(forecast, "wind_speed_10m") if ensemble else _values(forecast, "wind_speed_10m")
+        wind = (
+            _ensemble_centre(forecast, "wind_speed_10m")
+            if ensemble
+            else _values(forecast, "wind_speed_10m")
+        )
         gust = (
             _stat_values(forecast, "wind_gusts_10m", "p90")
             if ensemble
@@ -339,16 +448,18 @@ class ProfessionalMeteogramRenderer(RussianMeteogramRenderer):
             "90-й процентиль порывов" if ensemble else "порывы",
             "--",
         )
-        axis.axhline(14, color="#b23a48", linewidth=0.7, linestyle=":", alpha=0.8)
+        axis.axhline(14, color="#b23a48", linewidth=0.8, linestyle="--", alpha=0.82)
         axis.text(
-            0.995,
+            0.006,
             14,
-            "порог 14 м/с",
+            "порог порывов 14 м/с",
             transform=axis.get_yaxis_transform(),
-            ha="right",
+            ha="left",
             va="bottom",
-            fontsize=6.8,
+            fontsize=6.7,
             color="#9f2d3a",
+            bbox={"boxstyle": "round,pad=0.12", "fc": "white", "ec": "none", "alpha": 0.9},
+            zorder=20,
         )
         axis.set_ylabel("м/с", fontsize=8, rotation=0, labelpad=13)
         axis.set_ylim(bottom=0)
@@ -356,7 +467,11 @@ class ProfessionalMeteogramRenderer(RussianMeteogramRenderer):
         pressure_axis = axis.twinx()
         pressure_axis.spines["top"].set_visible(False)
         pressure_axis.spines["right"].set_color(self.palette.pressure)
-        pressure = _ensemble_centre(forecast, "pressure_msl") if ensemble else _values(forecast, "pressure_msl")
+        pressure = (
+            _ensemble_centre(forecast, "pressure_msl")
+            if ensemble
+            else _values(forecast, "pressure_msl")
+        )
         if ensemble:
             self._band(
                 pressure_axis,
@@ -366,10 +481,17 @@ class ProfessionalMeteogramRenderer(RussianMeteogramRenderer):
                 self.palette.pressure,
                 0.1,
             )
-        self._line_smoothed(pressure_axis, x, pressure, self.palette.pressure, 1.15, "давление")
+        self._line_smoothed(
+            pressure_axis,
+            x,
+            pressure,
+            self.palette.pressure,
+            1.15,
+            "давление",
+        )
         pressure_axis.set_ylabel("гПа", fontsize=8, rotation=0, labelpad=15)
         pressure_axis.tick_params(axis="y", labelsize=7, colors=self.palette.pressure)
-        _combined_legend(axis, pressure_axis, loc="upper left")
+        self._combined_legend_above(axis, pressure_axis, ncol=4, fontsize=6.8)
         self._add_wind_direction_arrows(axis, x, forecast)
 
     def _add_wind_direction_arrows(
@@ -407,21 +529,34 @@ class ProfessionalMeteogramRenderer(RussianMeteogramRenderer):
             [point.weather_code in THUNDER_CODES for point in forecast.points],
             dtype=bool,
         )
-        if thunder.any():
-            indices = np.flatnonzero(thunder)
-            left = x[indices[0]]
-            right = x[indices[-1]]
+        indices = np.flatnonzero(thunder)
+        if indices.size == 0:
+            return
+        groups = np.split(indices, np.flatnonzero(np.diff(indices) > 1) + 1)
+        typical_step = _bar_width(x) / 0.78 if x.size > 1 else 0.03
+        for group in groups:
+            left = x[int(group[0])] - typical_step * 0.42
+            right = x[int(group[-1])] + typical_step * 0.42
             for axis in axes:
-                axis.axvspan(left, right, color="#7b2cbf", alpha=0.065, linewidth=0, zorder=0.2)
+                axis.axvspan(
+                    left,
+                    right,
+                    color="#7b2cbf",
+                    alpha=0.065,
+                    linewidth=0,
+                    zorder=0.2,
+                )
             axes[0].text(
                 (left + right) / 2,
                 0.12,
                 "гроза",
                 transform=axes[0].get_xaxis_transform(),
                 ha="center",
-                fontsize=7.2,
+                fontsize=7.0,
                 color="#6a1b9a",
                 fontweight="bold",
+                bbox={"boxstyle": "round,pad=0.12", "fc": "white", "ec": "none", "alpha": 0.88},
+                zorder=20,
             )
 
     def _mark_extrema(
@@ -434,16 +569,29 @@ class ProfessionalMeteogramRenderer(RussianMeteogramRenderer):
         finite = np.flatnonzero(np.isfinite(values))
         if finite.size == 0:
             return
-        for index in {int(finite[np.argmin(values[finite])]), int(finite[np.argmax(values[finite])])}:
-            axis.scatter([x[index]], [values[index]], s=12, color=self.palette.temperature, zorder=6)
+        minimum = int(finite[np.argmin(values[finite])])
+        maximum = int(finite[np.argmax(values[finite])])
+        items = [(minimum, 8, "bottom")]
+        if maximum != minimum:
+            items.append((maximum, -13, "top"))
+        x_min = float(np.nanmin(x))
+        x_max = float(np.nanmax(x))
+        span = max(x_max - x_min, 1e-9)
+        for index, offset, vertical in items:
+            fraction = (float(x[index]) - x_min) / span
+            horizontal = "left" if fraction < 0.06 else "right" if fraction > 0.94 else "center"
+            axis.scatter([x[index]], [values[index]], s=12, color=self.palette.temperature, zorder=8)
             axis.annotate(
                 f"{values[index]:.1f} {unit}".replace(".", ","),
                 (x[index], values[index]),
-                xytext=(0, 7),
+                xytext=(0, offset),
                 textcoords="offset points",
-                ha="center",
-                fontsize=7,
+                ha=horizontal,
+                va=vertical,
+                fontsize=6.9,
                 color=self.palette.temperature,
+                bbox={"boxstyle": "round,pad=0.12", "fc": "white", "ec": "none", "alpha": 0.9},
+                zorder=20,
             )
 
     def _finish_professional(
@@ -463,7 +611,14 @@ class ProfessionalMeteogramRenderer(RussianMeteogramRenderer):
         axes[-1].xaxis.set_minor_formatter(mdates.DateFormatter("%H", tz=timezone))
         axes[-1].tick_params(axis="x", which="major", labelsize=8, pad=5)
         axes[-1].tick_params(axis="x", which="minor", labelsize=7, pad=2)
-        axes[-1].set_xlim(times[0], times[-1])
+        numeric_times = mdates.date2num(times)
+        if len(numeric_times) > 1:
+            steps = np.diff(numeric_times)
+            steps = steps[steps > 0]
+            padding = float(np.median(steps) * 0.45) if steps.size else 0.03
+        else:
+            padding = 0.03
+        axes[-1].set_xlim(numeric_times[0] - padding, numeric_times[-1] + padding)
         for axis in axes[:-1]:
             axis.tick_params(axis="x", labelbottom=False)
         band_text = (
@@ -478,4 +633,4 @@ class ProfessionalMeteogramRenderer(RussianMeteogramRenderer):
             fontsize=7.2,
             color="#53636d",
         )
-        figure.subplots_adjust(left=0.065, right=0.935, top=0.94, bottom=0.12)
+        figure.subplots_adjust(left=0.065, right=0.905, top=0.935, bottom=0.105)

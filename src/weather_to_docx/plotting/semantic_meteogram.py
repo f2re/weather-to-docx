@@ -3,15 +3,13 @@ from __future__ import annotations
 import math
 from collections import defaultdict
 from datetime import date
-from pathlib import Path
 
-import matplotlib.dates as mdates
 import numpy as np
 from matplotlib.axes import Axes
+from matplotlib.colors import to_rgba
 from matplotlib.patches import Patch
 
 from weather_to_docx.analysis.impact_scales import (
-    DAILY_PRECIPITATION_REFERENCE_MM,
     PRECIPITATION_CLASSES,
     PRECIPITATION_RATE_CAP_MM_H,
     PRECIPITATION_RATE_TICKS,
@@ -24,7 +22,6 @@ from weather_to_docx.analysis.impact_scales import (
 from weather_to_docx.domain.models import ForecastSeries
 from weather_to_docx.plotting.meteogram import (
     _bar_width,
-    _combined_legend,
     _ensemble_centre,
     _probability_codes,
     _stat_values,
@@ -33,6 +30,9 @@ from weather_to_docx.plotting.meteogram import (
 from weather_to_docx.plotting.professional_meteogram import (
     ProfessionalMeteogramRenderer,
 )
+
+TRACE_RATE_LIMIT_MM_H = 0.1
+THUNDER_CODES = frozenset({95, 96, 99})
 
 
 class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
@@ -59,11 +59,23 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
                     _stat_values(forecast, "temperature_2m", "p90"),
                 ]
             )
-        finite = np.concatenate(
-            [values[np.isfinite(values)] for values in outer if np.isfinite(values).any()]
-        ) if any(np.isfinite(values).any() for values in outer) else np.asarray([])
-        lower = min(-20.0, math.floor((float(finite.min()) - 3) / 5) * 5) if finite.size else -20.0
-        upper = max(40.0, math.ceil((float(finite.max()) + 3) / 5) * 5) if finite.size else 40.0
+        finite = (
+            np.concatenate(
+                [values[np.isfinite(values)] for values in outer if np.isfinite(values).any()]
+            )
+            if any(np.isfinite(values).any() for values in outer)
+            else np.asarray([])
+        )
+        lower = (
+            min(-20.0, math.floor((float(finite.min()) - 3) / 5) * 5)
+            if finite.size
+            else -20.0
+        )
+        upper = (
+            max(40.0, math.ceil((float(finite.max()) + 3) / 5) * 5)
+            if finite.size
+            else 40.0
+        )
 
         self._temperature_background(axis, lower, upper)
         super()._plot_temperature(axis, x, forecast, ensemble=ensemble)
@@ -74,7 +86,11 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
         if finite.size:
             label = temperature_impact_label(float(finite.min()), float(finite.max()))
             if label:
-                index = int(np.nanargmax(centre)) if float(finite.max()) >= 30 else int(np.nanargmin(centre))
+                index = (
+                    int(np.nanargmax(centre))
+                    if float(finite.max()) >= 30
+                    else int(np.nanargmin(centre))
+                )
                 if "переход" in label:
                     index = int(np.flatnonzero(np.isfinite(centre))[0])
                 axis.annotate(
@@ -85,8 +101,13 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
                     fontsize=7.1,
                     fontweight="bold",
                     color="#9b2c2c" if centre[index] >= 30 else "#225b8f",
-                    bbox={"boxstyle": "round,pad=0.2", "fc": "white", "ec": "none", "alpha": 0.82},
-                    zorder=8,
+                    bbox={
+                        "boxstyle": "round,pad=0.2",
+                        "fc": "white",
+                        "ec": "none",
+                        "alpha": 0.92,
+                    },
+                    zorder=21,
                 )
 
     def _temperature_background(self, axis: Axes, lower: float, upper: float) -> None:
@@ -106,17 +127,10 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
                 continue
             axis.axhspan(visible_start, visible_end, color=color, alpha=0.52, zorder=-10)
             if label:
-                axis.text(
-                    0.997,
+                self._outside_zone_label(
+                    axis,
                     (visible_start + visible_end) / 2,
                     label,
-                    transform=axis.get_yaxis_transform(),
-                    ha="right",
-                    va="center",
-                    fontsize=6.2,
-                    color="#5c6670",
-                    alpha=0.82,
-                    zorder=0,
                 )
         for threshold in (-20, -10, 0, 30, 35):
             if lower < threshold < upper:
@@ -128,6 +142,22 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
                     alpha=0.85,
                     zorder=0,
                 )
+
+    def _outside_zone_label(self, axis: Axes, y: float, label: str) -> None:
+        axis.text(
+            1.008,
+            y,
+            label,
+            transform=axis.get_yaxis_transform(),
+            ha="left",
+            va="center",
+            fontsize=6.1,
+            color="#53636d",
+            alpha=0.9,
+            clip_on=False,
+            bbox={"boxstyle": "round,pad=0.1", "fc": "white", "ec": "none", "alpha": 0.82},
+            zorder=20,
+        )
 
     def _mark_zero_crossings(self, axis: Axes, x: np.ndarray, values: np.ndarray) -> None:
         for index in range(1, len(values)):
@@ -154,7 +184,8 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
                     textcoords="offset points",
                     fontsize=6.6,
                     color="#315b7d",
-                    zorder=9,
+                    bbox={"boxstyle": "round,pad=0.1", "fc": "white", "ec": "none", "alpha": 0.9},
+                    zorder=20,
                 )
 
     def _plot_humidity(
@@ -173,17 +204,7 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
             axis.axhline(threshold, color="#aebdc7", linewidth=0.55, linestyle=":", zorder=0)
         super()._plot_humidity(axis, x, forecast, ensemble=ensemble)
         for y, label in ((20, "сухо"), (80, "влажно"), (96, "очень влажно")):
-            axis.text(
-                0.997,
-                y,
-                label,
-                transform=axis.get_yaxis_transform(),
-                ha="right",
-                va="center",
-                fontsize=6.2,
-                color="#53636d",
-                alpha=0.82,
-            )
+            self._outside_zone_label(axis, y, label)
         if not ensemble:
             self._mark_fog_risk(axis, x, forecast)
 
@@ -209,7 +230,13 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
                     fontsize=6.8,
                     fontweight="bold",
                     color="#315b7d",
-                    bbox={"boxstyle": "round,pad=0.18", "fc": "white", "ec": "none", "alpha": 0.8},
+                    bbox={
+                        "boxstyle": "round,pad=0.18",
+                        "fc": "white",
+                        "ec": "none",
+                        "alpha": 0.92,
+                    },
+                    zorder=21,
                 )
                 break
 
@@ -234,6 +261,9 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
             np.nan_to_num(rates, nan=0.0),
             PRECIPITATION_RATE_CAP_MM_H,
         )
+        trace_mask = np.isfinite(rates) & (rates > 0) & (rates < TRACE_RATE_LIMIT_MM_H)
+        bar_heights = display_rates.copy()
+        bar_heights[trace_mask] = 0.0
         colors = [
             precipitation_scale_class(
                 rate if math.isfinite(rate) else 0.0,
@@ -241,36 +271,45 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
             ).color
             for index, rate in enumerate(rates)
         ]
+        thunder_flags = [
+            forecast.points[index].weather_code in THUNDER_CODES and bar_heights[index] > 0
+            for index in range(len(forecast.points))
+        ]
+        facecolors = [to_rgba(color, 0.86) for color in colors]
+        edgecolors = [
+            to_rgba("#6a1b9a", 1.0) if thunder else (0.0, 0.0, 0.0, 0.0)
+            for thunder in thunder_flags
+        ]
+        linewidths = [0.9 if thunder else 0.0 for thunder in thunder_flags]
 
         self._precipitation_background(axis)
         bars = axis.bar(
             x,
-            display_rates,
+            bar_heights,
             width=_bar_width(x) * 0.88,
-            color=colors,
-            alpha=0.86,
-            edgecolor=[
-                "#6a1b9a"
-                if forecast.points[index].weather_code in {95, 96, 99}
-                else "none"
-                for index in range(len(forecast.points))
-            ],
-            linewidth=0.9,
+            color=facecolors,
+            edgecolor=edgecolors,
+            linewidth=linewidths,
             label="интенсивность осадков",
             zorder=3,
         )
+        trace_markers = None
+        if trace_mask.any():
+            trace_colors = [colors[index] for index in np.flatnonzero(trace_mask)]
+            trace_markers = axis.scatter(
+                x[trace_mask],
+                np.full(int(trace_mask.sum()), 0.12),
+                marker="_",
+                s=34,
+                linewidths=1.6,
+                color=trace_colors,
+                zorder=6,
+                label="следы <0,1 мм/ч",
+            )
+
         axis.set_ylabel("мм/ч", fontsize=8, rotation=0, labelpad=15)
         axis.set_ylim(0, PRECIPITATION_RATE_CAP_MM_H)
         axis.set_yticks(PRECIPITATION_RATE_TICKS)
-        axis.text(
-            0.004,
-            0.97,
-            f"суточный ориентир: {DAILY_PRECIPITATION_REFERENCE_MM:g} мм",
-            transform=axis.transAxes,
-            va="top",
-            fontsize=6.3,
-            color="#53636d",
-        )
 
         for index, rate in enumerate(rates):
             if math.isfinite(rate) and rate > PRECIPITATION_RATE_CAP_MM_H:
@@ -283,20 +322,11 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
                     fontsize=6.7,
                     fontweight="bold",
                     color="#0a3f6b",
-                )
-            if forecast.points[index].weather_code in {95, 96, 99} and display_rates[index] > 0:
-                axis.text(
-                    x[index],
-                    min(PRECIPITATION_RATE_CAP_MM_H - 0.5, display_rates[index] + 0.35),
-                    "гроза",
-                    ha="center",
-                    va="bottom",
-                    fontsize=6.2,
-                    color="#6a1b9a",
-                    fontweight="bold",
+                    bbox={"boxstyle": "round,pad=0.1", "fc": "white", "ec": "none", "alpha": 0.92},
+                    zorder=21,
                 )
 
-        self._annotate_daily_precipitation(axis, x, forecast, precipitation)
+        daily_labels = self._annotate_daily_precipitation(axis, x, forecast, precipitation)
 
         if ensemble:
             probability_axis = axis.twinx()
@@ -310,28 +340,35 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
                     where="mid",
                     color=probability_colors[index % len(probability_colors)],
                     linewidth=1.15,
-                    label=f"вероятность ≥{threshold} мм",
+                    label=f"P ≥{threshold} мм",
                     zorder=5,
                 )
             probability_axis.set_ylim(0, 100)
             probability_axis.set_ylabel("%", fontsize=8, rotation=0, labelpad=12)
             probability_axis.tick_params(axis="y", labelsize=7)
-            _combined_legend(axis, probability_axis, loc="upper left")
-        else:
-            axis.legend(
-                handles=[
-                    Patch(facecolor=item.color, label=item.label)
-                    for item in PRECIPITATION_CLASSES[1:]
-                ],
-                loc="upper left",
-                fontsize=6.4,
-                frameon=False,
-                ncol=5,
-                handlelength=1.0,
-                columnspacing=0.7,
+            self._combined_legend_above(
+                axis,
+                probability_axis,
+                ncol=6,
+                fontsize=6.35,
+                anchor_y=1.19,
             )
-        # Сохраняем ссылку для тестов соотношения высот столбиков.
+        else:
+            handles = [
+                Patch(facecolor=to_rgba(item.color, 0.86), edgecolor="none", label=item.label)
+                for item in PRECIPITATION_CLASSES
+            ]
+            self._legend_above(
+                axis,
+                handles=handles,
+                labels=["следы <0,1" if item.code == "trace" else item.label for item in PRECIPITATION_CLASSES],
+                ncol=6,
+                fontsize=6.25,
+                anchor_y=1.19,
+            )
         axis._weather_precipitation_bars = bars  # type: ignore[attr-defined]
+        axis._weather_precipitation_trace_markers = trace_markers  # type: ignore[attr-defined]
+        axis._weather_precipitation_daily_labels = daily_labels  # type: ignore[attr-defined]
 
     def _precipitation_background(self, axis: Axes) -> None:
         for item in PRECIPITATION_CLASSES:
@@ -342,18 +379,12 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
                 continue
             axis.axhspan(lower, upper, color=item.color, alpha=0.075, zorder=-10)
             if lower > 0:
-                axis.axhline(lower, color=item.color, linewidth=0.55, linestyle=":", alpha=0.75)
-            if item.code not in {"trace"}:
-                axis.text(
-                    0.997,
-                    (lower + upper) / 2,
-                    item.label,
-                    transform=axis.get_yaxis_transform(),
-                    ha="right",
-                    va="center",
-                    fontsize=5.9,
-                    color="#45535e",
-                    alpha=0.78,
+                axis.axhline(
+                    lower,
+                    color=item.color,
+                    linewidth=0.55,
+                    linestyle=":",
+                    alpha=0.75,
                 )
 
     def _annotate_daily_precipitation(
@@ -362,37 +393,54 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
         x: np.ndarray,
         forecast: ForecastSeries,
         precipitation: np.ndarray,
-    ) -> None:
+    ) -> list:
         by_day: dict[date, list[int]] = defaultdict(list)
         for index, point in enumerate(forecast.points):
             by_day[point.valid_time_local.date()].append(index)
+        labels = []
+        x_min = float(np.nanmin(x))
+        x_max = float(np.nanmax(x))
+        span = max(x_max - x_min, 1e-9)
         for day, indices in sorted(by_day.items()):
             summary = daily_precipitation_summary(
                 forecast,
                 day,
                 values=precipitation,
             )
-            if summary is None:
+            if summary is None or (summary.total_mm < 0.1 and not summary.thunder):
                 continue
             centre_x = float(np.mean(x[indices]))
-            ratio = summary.reference_ratio
-            ratio_text = (
-                f"{ratio:.1f}× ориентира".replace(".", ",")
-                if ratio >= 0.1
-                else "меньше 0,1× ориентира"
-            )
-            axis.text(
+            fraction = (centre_x - x_min) / span
+            horizontal = "left" if fraction < 0.07 else "right" if fraction > 0.93 else "center"
+            total = f"{summary.total_mm:.1f}".replace(".", ",")
+            if summary.thunder:
+                kind = "гроза"
+            elif summary.persistent_drizzle:
+                kind = "морось"
+            elif summary.total_mm >= 15:
+                kind = "много"
+            elif summary.total_mm >= 5:
+                kind = "дождь"
+            elif summary.total_mm >= 1:
+                kind = "осадки"
+            else:
+                kind = "следы"
+            text = axis.text(
                 centre_x,
-                PRECIPITATION_RATE_CAP_MM_H * 0.965,
-                f"{summary.short_text}\n{ratio_text}",
-                ha="center",
-                va="top",
-                fontsize=5.8,
+                1.035,
+                f"{total} мм · {kind}",
+                transform=axis.get_xaxis_transform(),
+                ha=horizontal,
+                va="bottom",
+                fontsize=6.15,
                 color="#253846",
                 fontweight="bold" if summary.total_mm >= 15 or summary.thunder else "normal",
-                bbox={"boxstyle": "round,pad=0.14", "fc": "white", "ec": "none", "alpha": 0.72},
-                zorder=8,
+                bbox={"boxstyle": "round,pad=0.12", "fc": "white", "ec": "none", "alpha": 0.94},
+                clip_on=False,
+                zorder=22,
             )
+            labels.append(text)
+        return labels
 
     def _plot_wind_pressure(
         self,
@@ -412,15 +460,25 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
             if ensemble
             else _values(forecast, "wind_gusts_10m")
         )
-        finite_wind = np.concatenate(
-            [values[np.isfinite(values)] for values in (wind, gust) if np.isfinite(values).any()]
-        ) if any(np.isfinite(values).any() for values in (wind, gust)) else np.asarray([])
-        upper = max(25.0, math.ceil((float(finite_wind.max()) + 2) / 5) * 5) if finite_wind.size else 25.0
+        finite_wind = (
+            np.concatenate(
+                [values[np.isfinite(values)] for values in (wind, gust) if np.isfinite(values).any()]
+            )
+            if any(np.isfinite(values).any() for values in (wind, gust))
+            else np.asarray([])
+        )
+        upper = (
+            max(25.0, math.ceil((float(finite_wind.max()) + 2) / 5) * 5)
+            if finite_wind.size
+            else 25.0
+        )
         self._wind_background(axis, upper)
         axes_before = len(axis.figure.axes)
         super()._plot_wind_pressure(axis, x, forecast, ensemble=ensemble)
         axis.set_ylim(0, upper)
-        axis.set_yticks([value for value in (0, 5, 10, 14, 20, 25, 30, 35) if value <= upper])
+        axis.set_yticks(
+            [value for value in (0, 5, 10, 14, 20, 25, 30, 35) if value <= upper]
+        )
 
         pressure_axis = axis.figure.axes[-1] if len(axis.figure.axes) > axes_before else None
         if pressure_axis is not None and pressure_axis is not axis:
@@ -430,11 +488,37 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
                 else _values(forecast, "pressure_msl")
             )
             finite_pressure = pressure[np.isfinite(pressure)]
-            lower_pressure = min(970.0, math.floor(float(finite_pressure.min()) / 10) * 10) if finite_pressure.size else 970.0
-            upper_pressure = max(1040.0, math.ceil(float(finite_pressure.max()) / 10) * 10) if finite_pressure.size else 1040.0
-            pressure_axis.axhspan(lower_pressure, 990, color="#fde8e7", alpha=0.32, zorder=-10)
-            pressure_axis.axhspan(1030, upper_pressure, color="#e7f1fb", alpha=0.34, zorder=-10)
-            pressure_axis.axhline(1013, color="#7f6f52", linewidth=0.6, linestyle=":", alpha=0.75)
+            lower_pressure = (
+                min(970.0, math.floor(float(finite_pressure.min()) / 10) * 10)
+                if finite_pressure.size
+                else 970.0
+            )
+            upper_pressure = (
+                max(1040.0, math.ceil(float(finite_pressure.max()) / 10) * 10)
+                if finite_pressure.size
+                else 1040.0
+            )
+            pressure_axis.axhspan(
+                lower_pressure,
+                990,
+                color="#fde8e7",
+                alpha=0.32,
+                zorder=-10,
+            )
+            pressure_axis.axhspan(
+                1030,
+                upper_pressure,
+                color="#e7f1fb",
+                alpha=0.34,
+                zorder=-10,
+            )
+            pressure_axis.axhline(
+                1013,
+                color="#7f6f52",
+                linewidth=0.6,
+                linestyle=":",
+                alpha=0.75,
+            )
             pressure_axis.set_ylim(lower_pressure, upper_pressure)
             pressure_axis.set_yticks(
                 np.arange(math.ceil(lower_pressure / 20) * 20, upper_pressure + 0.1, 20)
@@ -442,28 +526,17 @@ class SemanticMeteogramRenderer(ProfessionalMeteogramRenderer):
 
     def _wind_background(self, axis: Axes, upper: float) -> None:
         zones = (
-            (0, 5, "#eef7ef", "слабый"),
-            (5, 10, "#f4f7e8", "ветрено"),
-            (10, 14, "#fff4d6", "сильный"),
-            (14, 20, "#ffe4cc", "очень сильный"),
-            (20, upper, "#ffd1d1", "опасный"),
+            (0, 5, "#eef7ef"),
+            (5, 10, "#f4f7e8"),
+            (10, 14, "#fff4d6"),
+            (14, 20, "#ffe4cc"),
+            (20, upper, "#ffd1d1"),
         )
-        for lower, end, color, label in zones:
+        for lower, end, color in zones:
             visible_end = min(end, upper)
             if visible_end <= lower:
                 continue
             axis.axhspan(lower, visible_end, color=color, alpha=0.5, zorder=-10)
-            axis.text(
-                0.997,
-                (lower + visible_end) / 2,
-                label,
-                transform=axis.get_yaxis_transform(),
-                ha="right",
-                va="center",
-                fontsize=6.0,
-                color="#53636d",
-                alpha=0.8,
-            )
         for threshold in (5, 10, 14, 20):
             if threshold < upper:
                 axis.axhline(
