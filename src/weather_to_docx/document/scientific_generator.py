@@ -12,6 +12,13 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
 from weather_to_docx.document import audit_generator as _audit_generator
+from weather_to_docx.document import compact_generator as _compact_generator
+from weather_to_docx.document.consistent_controls import (
+    consistent_control_point,
+    detail_precipitation_text,
+    detail_wind_text,
+    shade_daily_hazard,
+)
 from weather_to_docx.document.consistent_summary import (
     build_consistent_risk_signals,
     consistent_daily_model_metrics,
@@ -177,6 +184,10 @@ def _translated_chart_note(document: Document, text: str) -> None:
 
 
 apply_russian_display_names()
+_compact_generator._consensus_point = consistent_control_point
+_compact_generator._detail_precipitation_text = detail_precipitation_text
+_compact_generator._detail_wind_text = detail_wind_text
+_compact_generator._shade_daily_hazard = shade_daily_hazard
 _audit_generator.ProfessionalMeteogramRenderer = DocumentMeteogramRenderer
 _audit_generator.build_risk_signals = build_consistent_risk_signals
 _audit_generator._daily_model_metrics = consistent_daily_model_metrics
@@ -185,6 +196,7 @@ _audit_generator._daily_temperature_text = daily_temperature_text
 _audit_generator._daily_wind_text = daily_wind_text
 _audit_generator._daily_pressure_text = daily_pressure_text
 _audit_generator._daily_precipitation_text_professional = daily_precipitation_text
+_audit_generator._shade_daily_hazard = shade_daily_hazard
 _ORIGINAL_ADD_CHART_NOTE = _audit_generator.ScientificDocumentGenerator._add_chart_note
 _audit_generator.ScientificDocumentGenerator._add_chart_note = staticmethod(
     _translated_chart_note
