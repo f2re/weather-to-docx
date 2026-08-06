@@ -12,6 +12,18 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
 from weather_to_docx.document import audit_generator as _audit_generator
+from weather_to_docx.document import compact_generator as _compact_generator
+from weather_to_docx.document.consistent_controls import (
+    consistent_control_point,
+    detail_precipitation_text,
+    detail_wind_text,
+    shade_daily_hazard,
+)
+from weather_to_docx.document.consistent_summary import (
+    build_consistent_risk_signals,
+    consistent_daily_model_metrics,
+    consistent_daily_presentation_point,
+)
 from weather_to_docx.document.impact_labels import (
     daily_precipitation_text,
     daily_pressure_text,
@@ -19,6 +31,7 @@ from weather_to_docx.document.impact_labels import (
     daily_wind_text,
 )
 from weather_to_docx.document.russian_labels import apply_russian_display_names
+from weather_to_docx.document.source_names import source_display_name
 from weather_to_docx.domain.models import ForecastSeries
 from weather_to_docx.plotting.meteogram import _values
 from weather_to_docx.plotting.professional_meteogram import WIND_ARROWS
@@ -79,7 +92,7 @@ class DocumentMeteogramRenderer(SemanticMeteogramRenderer):
 
     @staticmethod
     def _complete_title(forecast: ForecastSeries, title: str | None) -> str:
-        base = title or forecast.source.model
+        base = title or source_display_name(forecast)
         if not forecast.points:
             return f"{forecast.location.name} · {base}"
         start = forecast.points[0].valid_time_local
@@ -139,9 +152,6 @@ def _add_meteogram_image(
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     paragraph.paragraph_format.space_before = Pt(2)
     paragraph.paragraph_format.space_after = Pt(1)
-    # LibreOffice обрезает верх inline-изображения, если оно наследует
-    # уменьшенный межстрочный интервал Normal (0,95). Явно резервируем строку,
-    # достаточную для графика высотой около 137 мм.
     paragraph.paragraph_format.line_spacing = Mm(140)
     paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
     run = paragraph.add_run()
@@ -175,11 +185,21 @@ def _translated_chart_note(document: Document, text: str) -> None:
 
 
 apply_russian_display_names()
+_compact_generator._short_model_name = source_display_name
+_compact_generator._consensus_point = consistent_control_point
+_compact_generator._detail_precipitation_text = detail_precipitation_text
+_compact_generator._detail_wind_text = detail_wind_text
+_compact_generator._shade_daily_hazard = shade_daily_hazard
+_audit_generator._short_model_name = source_display_name
 _audit_generator.ProfessionalMeteogramRenderer = DocumentMeteogramRenderer
+_audit_generator.build_risk_signals = build_consistent_risk_signals
+_audit_generator._daily_model_metrics = consistent_daily_model_metrics
+_audit_generator._daily_presentation_point = consistent_daily_presentation_point
 _audit_generator._daily_temperature_text = daily_temperature_text
 _audit_generator._daily_wind_text = daily_wind_text
 _audit_generator._daily_pressure_text = daily_pressure_text
 _audit_generator._daily_precipitation_text_professional = daily_precipitation_text
+_audit_generator._shade_daily_hazard = shade_daily_hazard
 _ORIGINAL_ADD_CHART_NOTE = _audit_generator.ScientificDocumentGenerator._add_chart_note
 _audit_generator.ScientificDocumentGenerator._add_chart_note = staticmethod(
     _translated_chart_note
