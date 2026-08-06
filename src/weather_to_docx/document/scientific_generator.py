@@ -1,11 +1,13 @@
 """Точка импорта профессионального генератора DOCX."""
 
 import math
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 from docx import Document
 from matplotlib.axes import Axes
+from matplotlib.figure import Figure
 
 from weather_to_docx.document import audit_generator as _audit_generator
 from weather_to_docx.document.impact_labels import (
@@ -22,7 +24,32 @@ from weather_to_docx.plotting.semantic_meteogram import SemanticMeteogramRendere
 
 
 class DocumentMeteogramRenderer(SemanticMeteogramRenderer):
-    """Рендерер с самодостаточным заголовком и устойчивыми символами."""
+    """Рендерер для DOCX с самодостаточными и читаемыми подписями."""
+
+    def _new_professional_figure(self, title: str):
+        figure, axes = super()._new_professional_figure(title)
+        # При ширине 276 мм изображение такой пропорции занимает около 136 мм
+        # по высоте и целиком помещается под заголовком страницы DOCX.
+        figure.set_size_inches(11.4, 5.55, forward=True)
+        figure.subplots_adjust(hspace=0.38)
+        return figure, axes
+
+    def _finish_professional(
+        self,
+        figure: Figure,
+        axes: tuple[Axes, ...],
+        times: list[datetime],
+        *,
+        ensemble: bool,
+    ) -> None:
+        super()._finish_professional(figure, axes, times, ensemble=ensemble)
+        figure.subplots_adjust(
+            left=0.065,
+            right=0.93,
+            top=0.93,
+            bottom=0.12,
+            hspace=0.38,
+        )
 
     def render_deterministic(
         self,
