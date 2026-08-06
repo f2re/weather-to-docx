@@ -43,7 +43,7 @@ class MeteogramDocumentInspection:
 
     def metadata(self) -> dict[str, object]:
         return {
-            "structural_check": "passed" if self.ready else "failed",
+            "structural_check": "passed" if self.error is None else "failed",
             "meteograms": self.large_media_count,
             "media_count": self.media_count,
             "structured_pages": self.structured_page_count,
@@ -154,6 +154,7 @@ def require_meteogram_docx(path: Path) -> MeteogramDocumentInspection:
         f"{inspection.oversized_image_count}"
     )
     raise RuntimeError(
-        "Метеограммы были запрошены, но итоговый DOCX не прошёл проверку: "
+        "Метеограммы были запрошены, но итоговый DOCX не содержит графика "
+        "или не прошёл проверку: "
         f"{details}"
     )
