@@ -148,8 +148,8 @@ def test_outlier_total_does_not_define_precipitation_class_or_risk() -> None:
 def test_one_persistent_drizzle_model_is_reported_as_minority() -> None:
     forecasts = [
         _series("persistent", total_mm=9.3, weather_code=51, intervals=8),
-        _series("wet-1", total_mm=0.6, weather_code=51),
-        _series("wet-2", total_mm=0.4, weather_code=51),
+        _series("wet-1", total_mm=0.6, weather_code=61),
+        _series("wet-2", total_mm=0.4, weather_code=61),
         _series("dry-1", total_mm=0.0),
         _series("dry-2", total_mm=0.0),
     ]
