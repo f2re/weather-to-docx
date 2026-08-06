@@ -41,13 +41,14 @@ def _series(
     value = total_mm / intervals
     points = []
     for index in range(intervals):
-        end_hour = int((index + 1) * interval_hours)
-        valid = START + timedelta(hours=end_hour)
+        end_step = (index + 1) * interval_hours
+        valid_hour = min(23, int(end_step))
+        valid = START + timedelta(hours=valid_hour)
         points.append(
             ForecastPoint(
                 valid_time_utc=valid,
                 valid_time_local=valid,
-                lead_hours=end_hour,
+                lead_hours=valid_hour,
                 weather_code=weather_code,
                 is_day=6 <= valid.hour <= 18,
                 values={
@@ -56,7 +57,7 @@ def _series(
                     "precipitation": ForecastValue(
                         value=value,
                         source_start_step=index * interval_hours,
-                        source_end_step=(index + 1) * interval_hours,
+                        source_end_step=end_step,
                         accumulation_hours=interval_hours,
                     ),
                     "wind_speed_10m": ForecastValue(value=4.0),
