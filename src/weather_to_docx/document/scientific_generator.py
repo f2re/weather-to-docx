@@ -276,25 +276,10 @@ def _precise_ensemble_summary(
         _replace_text_in_paragraph(paragraph, old_note, new_note)
 
 
-def _precise_risk_cards(
-    self,
-    document: Document,
-    risks,
-) -> None:
-    paragraph_start = len(document.paragraphs)
-    _ORIGINAL_RISK_CARDS(self, document, risks)
-    if risks and all(signal.model_count == 1 for signal in risks):
-        for paragraph in document.paragraphs[paragraph_start:]:
-            if _replace_text_in_paragraph(
-                paragraph,
-                "Ключевые риски",
-                "Потенциальные риски по одной модели",
-            ):
-                break
-
-
 apply_russian_display_names()
 
+# Единую семантику подключаем ко всем путям профессионального генератора,
+# включая унаследованные методы компактного представления.
 _compact_generator._short_model_name = source_display_name
 _compact_generator._daily_model_metrics = consistent_daily_model_metrics
 _compact_generator._daily_presentation_point = (
@@ -345,13 +330,6 @@ _ORIGINAL_ENSEMBLE_SUMMARY = (
 )
 _compact_generator.ScientificDocumentGenerator._add_ensemble_summary = (
     _precise_ensemble_summary
-)
-
-_ORIGINAL_RISK_CARDS = (
-    _audit_generator.ScientificDocumentGenerator._add_risk_cards
-)
-_audit_generator.ScientificDocumentGenerator._add_risk_cards = (
-    _precise_risk_cards
 )
 
 ScientificDocumentGenerator = (
