@@ -59,28 +59,72 @@ WMO_DESCRIPTIONS: dict[int, str] = {
 }
 
 
+def precipitation_interval_hours(point: ForecastPoint) -> float:
+    """Return the source accumulation interval used by a point."""
+
+    measurement = point.measurement("precipitation")
+    if measurement is not None:
+        if measurement.accumulation_hours is not None:
+            return max(0.01, float(measurement.accumulation_hours))
+        if (
+            measurement.source_start_step is not None
+            and measurement.source_end_step is not None
+            and measurement.source_end_step > measurement.source_start_step
+        ):
+            return float(
+                measurement.source_end_step - measurement.source_start_step
+            )
+    return 1.0
+
+
+def precipitation_rate_mm_h(point: ForecastPoint) -> float:
+    amount = _number(point.raw("precipitation")) or 0.0
+    return max(0.0, amount) / precipitation_interval_hours(point)
+
+
 def derive_weather_code(point: ForecastPoint) -> int:
+    """Derive a point code from interval-normalised physical quantities."""
+
     if point.weather_code is not None:
         return int(point.weather_code)
 
-    precipitation = float(point.raw("precipitation", 0) or 0)
-    snowfall = float(point.raw("snowfall", 0) or 0)
-    temperature = float(point.raw("temperature_2m", 5) or 5)
-    visibility = float(point.raw("visibility", 100_000) or 100_000)
-    cloud = float(point.raw("cloud_cover", 0) or 0)
-    cape = float(point.raw("cape", 0) or 0)
+    precipitation_rate = precipitation_rate_mm_h(point)
+    interval_hours = precipitation_interval_hours(point)
+    snowfall_rate = max(0.0, _number(point.raw("snowfall")) or 0.0) / interval_hours
+    shower_rate = max(
+        _number(point.raw("showers")) or 0.0,
+        _number(point.raw("convective_precipitation")) or 0.0,
+    ) / interval_hours
+    temperature = _number(point.raw("temperature_2m"))
+    visibility = _number(point.raw("visibility"))
+    cloud = _number(point.raw("cloud_cover")) or 0.0
+    cape = _number(point.raw("cape")) or 0.0
 
-    if cape >= 800 and precipitation >= 0.2:
+    if cape >= 800 and precipitation_rate >= 0.2:
         return 95
-    if snowfall >= 0.1 or (temperature <= 0 and precipitation >= 0.3):
-        return 75 if snowfall >= 1.5 else 73 if snowfall >= 0.5 else 71
-    if precipitation >= 7:
-        return 82
-    if precipitation >= 2:
+    if snowfall_rate > 0:
+        if snowfall_rate >= 1.5:
+            return 75
+        if snowfall_rate >= 0.5:
+            return 73
+        return 71
+    if shower_rate > 0:
+        if shower_rate >= 10:
+            return 82
+        if shower_rate >= 5:
+            return 81
+        return 80
+    if precipitation_rate > 0 and temperature is not None and temperature <= 0:
+        return 67 if precipitation_rate >= 5 else 66
+    if precipitation_rate >= 5:
         return 65
-    if precipitation >= 0.2:
+    if precipitation_rate >= 2:
+        return 63
+    if precipitation_rate >= 0.5:
         return 61
-    if visibility < 1000:
+    if precipitation_rate > 0:
+        return 51
+    if visibility is not None and visibility < 1000:
         return 45
     if cloud >= 85:
         return 3
@@ -129,3 +173,10 @@ def weather_presentation(point: ForecastPoint) -> WeatherPresentation:
     else:
         icon = "cloudy"
     return WeatherPresentation(code=code, description=description, icon_key=icon)
+
+
+def _number(value) -> float | None:
+    try:
+        return float(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None

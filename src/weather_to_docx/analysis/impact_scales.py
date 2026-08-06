@@ -66,7 +66,7 @@ def precipitation_scale_class(
         return PRECIPITATION_CLASSES[-1]
     if weather_code in DRIZZLE_CODES and rate < 2.0:
         return PRECIPITATION_CLASSES[1]
-    if weather_code in SHOWER_CODES and rate >= 5.0:
+    if weather_code in SHOWER_CODES:
         return PRECIPITATION_CLASSES[-1]
     for item in PRECIPITATION_CLASSES:
         if item.upper_rate_mm_h is None or rate < item.upper_rate_mm_h:
@@ -120,6 +120,23 @@ def normalise_precipitation_rates(
     return rates
 
 
+def daily_precipitation_amount_label(total_mm: float) -> str:
+    """Return a phase-neutral quantitative class for a daily total."""
+
+    total = max(0.0, float(total_mm))
+    if total < 0.1:
+        return "без осадков"
+    if total < 1.0:
+        return "слабые осадки"
+    if total < 5.0:
+        return "небольшие осадки"
+    if total < 15.0:
+        return "заметные осадки"
+    if total < 30.0:
+        return "много осадков"
+    return "очень много осадков"
+
+
 def daily_precipitation_summary(
     forecast: ForecastSeries,
     day: date,
@@ -139,12 +156,15 @@ def daily_precipitation_summary(
     else:
         raw_values = list(values)
     selected_values = [raw_values[index] for index in indices]
-    rates = normalise_precipitation_rates(points, selected_values)
+    finite_values = [_as_float(value) for value in selected_values]
+    finite_values = [value for value in finite_values if value is not None]
+    if not finite_values:
+        return None
 
+    rates = normalise_precipitation_rates(points, selected_values)
     total = daily_precipitation_total(points)
     if total is None:
-        finite_values = [_as_float(value) for value in selected_values]
-        total = sum(max(0.0, value) for value in finite_values if value is not None)
+        total = sum(max(0.0, value) for value in finite_values)
     finite_rates = [rate for rate in rates if math.isfinite(rate)]
     maximum_rate = max(finite_rates, default=0.0)
     wet_hours = sum(
@@ -164,24 +184,13 @@ def daily_precipitation_summary(
     )
     persistent_drizzle = drizzle_hours >= 6 and maximum_rate < 2.0
 
-    if thunder:
-        label = "гроза / ливень"
-    elif maximum_rate >= 10.0:
-        label = "ливень"
-    elif persistent_drizzle:
-        label = "длительная морось"
-    elif total < 0.1:
-        label = "сухо"
-    elif total < 1.0:
-        label = "следы осадков"
-    elif total < 5.0:
-        label = "небольшие осадки"
-    elif total < 15.0:
-        label = "заметный дождь"
-    elif total < 30.0:
-        label = "много осадков"
-    else:
-        label = "очень много осадков"
+    label = (
+        "гроза / ливень"
+        if thunder
+        else "длительная морось"
+        if persistent_drizzle
+        else daily_precipitation_amount_label(total)
+    )
 
     return DailyPrecipitationSummary(
         total_mm=total,
@@ -221,17 +230,17 @@ def wind_impact_label(
     maximum_wind_ms: float | None,
     maximum_gust_ms: float | None,
 ) -> str | None:
-    effective = max(
-        maximum_wind_ms or 0.0,
-        maximum_gust_ms or 0.0,
-    )
-    if effective >= 20:
+    """Classify sustained wind and gusts separately."""
+
+    gust = maximum_gust_ms or 0.0
+    wind = maximum_wind_ms or 0.0
+    if gust >= 20:
         return "опасные порывы"
-    if effective >= 14:
+    if gust >= 14:
         return "сильные порывы"
-    if effective >= 10:
+    if wind >= 10:
         return "сильный ветер"
-    if effective >= 5:
+    if wind >= 5 or gust >= 8:
         return "ветрено"
     return None
 
