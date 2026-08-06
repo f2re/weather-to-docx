@@ -3,8 +3,8 @@ from __future__ import annotations
 from weather_to_docx.domain.models import ForecastSeries
 
 MODEL_SHORT_NAMES = {
-    "NOAA GFS 0.25°": "GFS",
-    "Global Forecast System (GFS)": "GFS",
+    "NOAA GFS 0.25°": "NOAA GFS",
+    "Global Forecast System (GFS)": "NOAA GFS",
     "ECMWF IFS 0.25° Open Data": "ECMWF IFS",
     "ECMWF AIFS 0.25° Single": "ECMWF AIFS",
     "DWD ICON Global": "ICON",
