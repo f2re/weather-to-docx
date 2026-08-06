@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from zipfile import BadZipFile, ZipFile
@@ -7,6 +8,8 @@ from zipfile import BadZipFile, ZipFile
 from weather_to_docx.document.render_validation import validate_rendered_document
 
 MIN_METEOGRAM_IMAGE_BYTES = 12_000
+MAX_METEOGRAM_IMAGE_HEIGHT_MM = 145.0
+EMU_PER_MM = 36_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +23,8 @@ class MeteogramDocumentInspection:
     structured_page_count: int
     has_risk_section: bool
     has_russian_weekdays: bool
+    oversized_image_count: int = 0
+    max_image_height_mm: float | None = None
     visual_check: str = "not-requested"
     rendered_page_count: int | None = None
     blank_pages: tuple[int, ...] = ()
@@ -33,16 +38,19 @@ class MeteogramDocumentInspection:
             self.error is None
             and self.has_meteogram_marker
             and self.large_media_count >= 1
+            and self.oversized_image_count == 0
         )
 
     def metadata(self) -> dict[str, object]:
         return {
-            "structural_check": "passed" if self.error is None else "failed",
+            "structural_check": "passed" if self.ready else "failed",
             "meteograms": self.large_media_count,
             "media_count": self.media_count,
             "structured_pages": self.structured_page_count,
             "risk_section": self.has_risk_section,
             "russian_weekdays": self.has_russian_weekdays,
+            "oversized_meteogram_images": self.oversized_image_count,
+            "max_image_height_mm": self.max_image_height_mm,
             "visual_check": self.visual_check,
             "rendered_pages": self.rendered_page_count,
             "blank_pages": list(self.blank_pages),
@@ -69,6 +77,8 @@ def inspect_meteogram_docx(
         "structured_page_count": 0,
         "has_risk_section": False,
         "has_russian_weekdays": False,
+        "oversized_image_count": 0,
+        "max_image_height_mm": None,
     }
     if minimum_image_bytes < 1:
         raise ValueError("Минимальный размер изображения должен быть положительным")
@@ -102,6 +112,15 @@ def inspect_meteogram_docx(
     russian_weekdays = any(
         token in folded for token in ("пн", "вт", "ср", "чт", "пт", "сб", "вс")
     )
+    image_heights_mm = tuple(
+        int(value) / EMU_PER_MM
+        for value in re.findall(r'<wp:extent\b[^>]*\bcy="(\d+)"', document_xml)
+    )
+    oversized = tuple(
+        height
+        for height in image_heights_mm
+        if height > MAX_METEOGRAM_IMAGE_HEIGHT_MM
+    )
     render = validate_rendered_document(path) if render_check else None
     return MeteogramDocumentInspection(
         path=path,
@@ -113,6 +132,8 @@ def inspect_meteogram_docx(
         structured_page_count=page_break_count + 1,
         has_risk_section="ключевые риски" in folded,
         has_russian_weekdays=russian_weekdays,
+        oversized_image_count=len(oversized),
+        max_image_height_mm=max(image_heights_mm, default=None),
         visual_check=render.status if render else "not-requested",
         rendered_page_count=render.page_count if render else None,
         blank_pages=render.blank_pages if render else (),
@@ -128,9 +149,11 @@ def require_meteogram_docx(path: Path) -> MeteogramDocumentInspection:
     details = inspection.error or (
         f"медиафайлов: {inspection.media_count}, "
         f"крупных изображений: {inspection.large_media_count}, "
-        f"метка метеограммы: {'есть' if inspection.has_meteogram_marker else 'нет'}"
+        f"метка метеограммы: {'есть' if inspection.has_meteogram_marker else 'нет'}, "
+        f"изображений выше {MAX_METEOGRAM_IMAGE_HEIGHT_MM:g} мм: "
+        f"{inspection.oversized_image_count}"
     )
     raise RuntimeError(
-        "Метеограммы были запрошены, но итоговый DOCX не содержит графика: "
+        "Метеограммы были запрошены, но итоговый DOCX не прошёл проверку: "
         f"{details}"
     )
