@@ -6,6 +6,8 @@ from pathlib import Path
 
 import numpy as np
 from docx import Document
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
+from docx.shared import Mm, Pt
 from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
@@ -127,6 +129,27 @@ class DocumentMeteogramRenderer(SemanticMeteogramRenderer):
             )
 
 
+def _add_meteogram_image(
+    document: Document,
+    image_path: Path,
+    *,
+    description: str,
+) -> None:
+    paragraph = document.add_paragraph()
+    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    paragraph.paragraph_format.space_before = Pt(2)
+    paragraph.paragraph_format.space_after = Pt(1)
+    # LibreOffice обрезает верх inline-изображения, если оно наследует
+    # уменьшенный межстрочный интервал Normal (0,95). Явно резервируем строку,
+    # достаточную для графика высотой около 137 мм.
+    paragraph.paragraph_format.line_spacing = Mm(140)
+    paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
+    run = paragraph.add_run()
+    shape = run.add_picture(str(image_path), width=Mm(276))
+    shape._inline.docPr.set("descr", description)
+    shape._inline.docPr.set("title", description)
+
+
 def _translated_chart_note(document: Document, text: str) -> None:
     replacements = {
         (
@@ -160,6 +183,9 @@ _audit_generator._daily_precipitation_text_professional = daily_precipitation_te
 _ORIGINAL_ADD_CHART_NOTE = _audit_generator.ScientificDocumentGenerator._add_chart_note
 _audit_generator.ScientificDocumentGenerator._add_chart_note = staticmethod(
     _translated_chart_note
+)
+_audit_generator.ScientificDocumentGenerator._add_meteogram_image = staticmethod(
+    _add_meteogram_image
 )
 ScientificDocumentGenerator = _audit_generator.ScientificDocumentGenerator
 
