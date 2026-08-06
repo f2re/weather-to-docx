@@ -29,9 +29,12 @@ def source_display_name(forecast: ForecastSeries) -> str:
 
     if source_id == "noaa_gfs_0p25" or "nomads" in provider:
         return "NOAA GFS (NOMADS)"
-    if source_id == "open_meteo_gfs" or "open-meteo" in provider or "open-meteo" in delivery:
-        if "gfs" in source_id or "gfs" in source.model.casefold():
-            return "NOAA GFS (Open-Meteo)"
+    if (
+        source_id == "open_meteo_gfs"
+        or "open-meteo" in provider
+        or "open-meteo" in delivery
+    ) and ("gfs" in source_id or "gfs" in source.model.casefold()):
+        return "NOAA GFS (Open-Meteo)"
 
     return model
 
