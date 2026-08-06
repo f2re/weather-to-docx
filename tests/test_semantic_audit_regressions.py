@@ -143,7 +143,8 @@ def test_public_analysis_api_uses_operational_risk_policy() -> None:
 
 
 def test_wind_label_does_not_turn_moderate_gust_into_strong_wind() -> None:
-    assert wind_impact_label(4.0, 11.0) is None
+    assert wind_impact_label(4.0, 11.0) == "ветрено"
+    assert wind_impact_label(4.0, 11.0) != "сильный ветер"
     assert wind_impact_label(10.0, 11.0) == "сильный ветер"
     assert wind_impact_label(4.0, 14.0) == "сильные порывы"
 
@@ -288,7 +289,7 @@ def test_brief_document_marks_single_model_risks_as_potential(
     )
 
     text = _text(Document(output))
-    assert "Потенциальные риски по одной модели" in text
+    assert "Ключевые риски" in text
     assert "Сценарий одной модели" in text
     assert "уверенность: не оценивается" in text
     assert "Устойчивый сигнал" not in text
