@@ -1,8 +1,11 @@
 """Точка импорта профессионального генератора DOCX."""
 
+import math
 from pathlib import Path
 
+import numpy as np
 from docx import Document
+from matplotlib.axes import Axes
 
 from weather_to_docx.document import audit_generator as _audit_generator
 from weather_to_docx.document.impact_labels import (
@@ -13,11 +16,13 @@ from weather_to_docx.document.impact_labels import (
 )
 from weather_to_docx.document.russian_labels import apply_russian_display_names
 from weather_to_docx.domain.models import ForecastSeries
+from weather_to_docx.plotting.meteogram import _values
+from weather_to_docx.plotting.professional_meteogram import WIND_ARROWS
 from weather_to_docx.plotting.semantic_meteogram import SemanticMeteogramRenderer
 
 
 class DocumentMeteogramRenderer(SemanticMeteogramRenderer):
-    """Рендерер с самодостаточным заголовком изображения."""
+    """Рендерер с самодостаточным заголовком и устойчивыми символами."""
 
     def render_deterministic(
         self,
@@ -58,6 +63,32 @@ class DocumentMeteogramRenderer(SemanticMeteogramRenderer):
             else f"{start:%d.%m}–{end:%d.%m.%Y}"
         )
         return f"{forecast.location.name} · {base} · {period}"
+
+    def _add_wind_direction_arrows(
+        self,
+        axis: Axes,
+        x: np.ndarray,
+        forecast: ForecastSeries,
+    ) -> None:
+        direction = _values(forecast, "wind_direction_10m")
+        finite = np.flatnonzero(np.isfinite(direction))
+        if finite.size == 0:
+            return
+        step = max(1, math.ceil(finite.size / 28))
+        for index in finite[::step]:
+            arrow_index = int(((direction[index] % 360) + 22.5) // 45) % 8
+            axis.text(
+                x[index],
+                0.04,
+                WIND_ARROWS[arrow_index],
+                transform=axis.get_xaxis_transform(),
+                ha="center",
+                va="bottom",
+                fontsize=8.5,
+                fontfamily="DejaVu Sans",
+                color="#2f5d46",
+                fontweight="bold",
+            )
 
 
 apply_russian_display_names()
