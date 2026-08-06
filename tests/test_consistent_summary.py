@@ -7,9 +7,9 @@ from weather_to_docx.document.consistent_summary import (
     build_consistent_risk_signals,
     consistent_daily_model_metrics,
     consistent_daily_presentation_point,
-    daily_precipitation_text,
     daily_wind_text,
 )
+from weather_to_docx.document.impact_labels import daily_precipitation_text
 from weather_to_docx.document.weather_rules import weather_presentation
 from weather_to_docx.domain.models import (
     ForecastPoint,
