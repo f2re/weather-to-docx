@@ -28,8 +28,6 @@ class DocumentMeteogramRenderer(SemanticMeteogramRenderer):
 
     def _new_professional_figure(self, title: str):
         figure, axes = super()._new_professional_figure(title)
-        # При ширине 276 мм изображение такой пропорции занимает около 136 мм
-        # по высоте и целиком помещается под заголовком страницы DOCX.
         figure.set_size_inches(11.4, 5.55, forward=True)
         figure.subplots_adjust(hspace=0.38)
         return figure, axes
@@ -100,8 +98,6 @@ class DocumentMeteogramRenderer(SemanticMeteogramRenderer):
         ensemble: bool,
     ) -> None:
         super()._plot_precipitation(axis, x, forecast, ensemble=ensemble)
-        # Нулевая отметка совпадает с осью, а 0 и 0,5 мм/ч при печати
-        # располагаются слишком близко. Оставляем только содержательные пороги.
         axis.set_yticks((0.5, 2.0, 5.0, 10.0))
 
     def _add_wind_direction_arrows(
@@ -131,43 +127,40 @@ class DocumentMeteogramRenderer(SemanticMeteogramRenderer):
             )
 
 
+def _translated_chart_note(document: Document, text: str) -> None:
+    replacements = {
+        (
+            "Серые полосы обозначают ночь. Осадки показаны за исходный интервал; "
+            "стрелки внизу показывают направление ветра."
+        ): (
+            "Серые полосы обозначают ночь. Столбики показывают среднюю "
+            "интенсивность осадков за расчётный интервал, мм/ч; подписи над "
+            "панелью — сумму за местные сутки. Стрелки внизу показывают "
+            "направление ветра."
+        ),
+        (
+            "Тёмная полоса — 25–75-й процентили, светлая — 10–90-й. "
+            "Вероятности осадков относятся к указанным порогам и интервалам."
+        ): (
+            "Тёмная полоса — 25–75-й процентили, светлая — 10–90-й. "
+            "Столбики показывают медианную интенсивность осадков, мм/ч; "
+            "линии P ≥ показывают вероятность превышения суммы за исходный "
+            "расчётный интервал."
+        ),
+    }
+    _ORIGINAL_ADD_CHART_NOTE(document, replacements.get(text, text))
+
+
 apply_russian_display_names()
 _audit_generator.ProfessionalMeteogramRenderer = DocumentMeteogramRenderer
 _audit_generator._daily_temperature_text = daily_temperature_text
 _audit_generator._daily_wind_text = daily_wind_text
 _audit_generator._daily_pressure_text = daily_pressure_text
 _audit_generator._daily_precipitation_text_professional = daily_precipitation_text
-
-
-class ScientificDocumentGenerator(_audit_generator.ScientificDocumentGenerator):
-    """Генератор с согласованными пояснениями к метеограммам."""
-
-    @staticmethod
-    def _add_chart_note(document: Document, text: str) -> None:
-        replacements = {
-            (
-                "Серые полосы обозначают ночь. Осадки показаны за исходный интервал; "
-                "стрелки внизу показывают направление ветра."
-            ): (
-                "Серые полосы обозначают ночь. Столбики показывают среднюю "
-                "интенсивность осадков за расчётный интервал, мм/ч; подписи над "
-                "панелью — сумму за местные сутки. Стрелки внизу показывают "
-                "направление ветра."
-            ),
-            (
-                "Тёмная полоса — 25–75-й процентили, светлая — 10–90-й. "
-                "Вероятности осадков относятся к указанным порогам и интервалам."
-            ): (
-                "Тёмная полоса — 25–75-й процентили, светлая — 10–90-й. "
-                "Столбики показывают медианную интенсивность осадков, мм/ч; "
-                "линии P ≥ показывают вероятность превышения суммы за исходный "
-                "расчётный интервал."
-            ),
-        }
-        _audit_generator.ScientificDocumentGenerator._add_chart_note(
-            document,
-            replacements.get(text, text),
-        )
-
+_ORIGINAL_ADD_CHART_NOTE = _audit_generator.ScientificDocumentGenerator._add_chart_note
+_audit_generator.ScientificDocumentGenerator._add_chart_note = staticmethod(
+    _translated_chart_note
+)
+ScientificDocumentGenerator = _audit_generator.ScientificDocumentGenerator
 
 __all__ = ["ScientificDocumentGenerator"]
