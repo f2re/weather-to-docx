@@ -91,6 +91,19 @@ class DocumentMeteogramRenderer(SemanticMeteogramRenderer):
         )
         return f"{forecast.location.name} · {base} · {period}"
 
+    def _plot_precipitation(
+        self,
+        axis: Axes,
+        x: np.ndarray,
+        forecast: ForecastSeries,
+        *,
+        ensemble: bool,
+    ) -> None:
+        super()._plot_precipitation(axis, x, forecast, ensemble=ensemble)
+        # Нулевая отметка совпадает с осью, а 0 и 0,5 мм/ч при печати
+        # располагаются слишком близко. Оставляем только содержательные пороги.
+        axis.set_yticks((0.5, 2.0, 5.0, 10.0))
+
     def _add_wind_direction_arrows(
         self,
         axis: Axes,
