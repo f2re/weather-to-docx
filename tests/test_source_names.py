@@ -4,7 +4,9 @@ from datetime import UTC, datetime
 
 from weather_to_docx.document.source_names import source_display_name
 from weather_to_docx.domain.models import (
+    ForecastPoint,
     ForecastSeries,
+    ForecastValue,
     Location,
     SourceMetadata,
 )
@@ -24,8 +26,19 @@ def _forecast(
     source_id: str,
     provider: str,
     model: str,
-    delivery_service: str | None = None,
 ) -> ForecastSeries:
+    point = ForecastPoint(
+        valid_time_utc=NOW,
+        valid_time_local=NOW,
+        lead_hours=0,
+        weather_code=2,
+        is_day=True,
+        values={
+            "temperature_2m": ForecastValue(value=20.0),
+            "wind_speed_10m": ForecastValue(value=3.0),
+            "pressure_msl": ForecastValue(value=1012.0),
+        },
+    )
     return ForecastSeries(
         location=LOCATION,
         source=SourceMetadata(
@@ -35,9 +48,8 @@ def _forecast(
             product="test",
             retrieved_at_utc=NOW,
             exact_cycle_known=False,
-            delivery_service=delivery_service,
         ),
-        points=[],
+        points=[point],
     )
 
 
@@ -51,7 +63,6 @@ def test_direct_and_open_meteo_gfs_names_are_distinct() -> None:
         source_id="open_meteo_gfs",
         provider="Open-Meteo / NOAA",
         model="NOAA GFS 0.25°",
-        delivery_service="Open-Meteo",
     )
 
     assert source_display_name(direct) == "NOAA GFS (NOMADS)"
