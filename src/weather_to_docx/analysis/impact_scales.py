@@ -62,11 +62,11 @@ def precipitation_scale_class(
     weather_code: int | None = None,
 ) -> PrecipitationScaleClass:
     rate = max(0.0, float(rate_mm_h))
-    if weather_code in THUNDER_CODES and rate >= 5.0:
+    if weather_code in THUNDER_CODES:
         return PRECIPITATION_CLASSES[-1]
     if weather_code in DRIZZLE_CODES and rate < 2.0:
         return PRECIPITATION_CLASSES[1]
-    if weather_code in SHOWER_CODES and rate >= 5.0:
+    if weather_code in SHOWER_CODES:
         return PRECIPITATION_CLASSES[-1]
     for item in PRECIPITATION_CLASSES:
         if item.upper_rate_mm_h is None or rate < item.upper_rate_mm_h:
@@ -184,11 +184,19 @@ def daily_precipitation_summary(
     )
     persistent_drizzle = drizzle_hours >= 6 and maximum_rate < 2.0
 
+    label = (
+        "гроза / ливень"
+        if thunder
+        else "длительная морось"
+        if persistent_drizzle
+        else daily_precipitation_amount_label(total)
+    )
+
     return DailyPrecipitationSummary(
         total_mm=total,
         maximum_rate_mm_h=maximum_rate,
         wet_hours=wet_hours,
-        label=daily_precipitation_amount_label(total),
+        label=label,
         reference_ratio=total / DAILY_PRECIPITATION_REFERENCE_MM,
         thunder=thunder,
         persistent_drizzle=persistent_drizzle,
@@ -232,7 +240,7 @@ def wind_impact_label(
         return "сильные порывы"
     if wind >= 10:
         return "сильный ветер"
-    if wind >= 5:
+    if wind >= 5 or gust >= 8:
         return "ветрено"
     return None
 
