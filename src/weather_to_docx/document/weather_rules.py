@@ -12,6 +12,16 @@ class WeatherPresentation:
     icon_key: str
 
 
+# Служебные коды суточной межмодельной сводки. Они не являются кодами WMO:
+# WMO-код относится к конкретному сроку, а эти значения описывают согласованный
+# сценарий суток по количественным данным и поддержке моделей.
+SUMMARY_POSSIBLE_PRECIPITATION = 1001
+SUMMARY_LIGHT_PRECIPITATION = 1002
+SUMMARY_RAIN = 1003
+SUMMARY_HEAVY_PRECIPITATION = 1004
+SUMMARY_THUNDERSTORM = 1005
+
+
 WMO_DESCRIPTIONS: dict[int, str] = {
     0: "Ясно",
     1: "Преимущественно ясно",
@@ -41,6 +51,11 @@ WMO_DESCRIPTIONS: dict[int, str] = {
     95: "Гроза",
     96: "Гроза с небольшим градом",
     99: "Гроза с сильным градом",
+    SUMMARY_POSSIBLE_PRECIPITATION: "Осадки возможны",
+    SUMMARY_LIGHT_PRECIPITATION: "Слабые осадки",
+    SUMMARY_RAIN: "Дождь",
+    SUMMARY_HEAVY_PRECIPITATION: "Сильные осадки",
+    SUMMARY_THUNDERSTORM: "Гроза",
 }
 
 
@@ -89,13 +104,27 @@ def weather_presentation(point: ForecastPoint) -> WeatherPresentation:
         icon = "cloudy"
     elif code in {45, 48}:
         icon = "fog"
-    elif code in {51, 53, 55, 61, 63, 65, 80, 81, 82}:
+    elif code in {
+        51,
+        53,
+        55,
+        61,
+        63,
+        65,
+        80,
+        81,
+        82,
+        SUMMARY_POSSIBLE_PRECIPITATION,
+        SUMMARY_LIGHT_PRECIPITATION,
+        SUMMARY_RAIN,
+        SUMMARY_HEAVY_PRECIPITATION,
+    }:
         icon = "rain"
     elif code in {56, 57, 66, 67}:
         icon = "freezing_rain"
     elif code in {71, 73, 75, 77, 85, 86}:
         icon = "snow"
-    elif code in {95, 96, 99}:
+    elif code in {95, 96, 99, SUMMARY_THUNDERSTORM}:
         icon = "thunderstorm"
     else:
         icon = "cloudy"
