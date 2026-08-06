@@ -12,6 +12,11 @@ from matplotlib.axes import Axes
 from matplotlib.figure import Figure
 
 from weather_to_docx.document import audit_generator as _audit_generator
+from weather_to_docx.document.consistent_summary import (
+    build_consistent_risk_signals,
+    consistent_daily_model_metrics,
+    consistent_daily_presentation_point,
+)
 from weather_to_docx.document.impact_labels import (
     daily_precipitation_text,
     daily_pressure_text,
@@ -139,9 +144,6 @@ def _add_meteogram_image(
     paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
     paragraph.paragraph_format.space_before = Pt(2)
     paragraph.paragraph_format.space_after = Pt(1)
-    # LibreOffice обрезает верх inline-изображения, если оно наследует
-    # уменьшенный межстрочный интервал Normal (0,95). Явно резервируем строку,
-    # достаточную для графика высотой около 137 мм.
     paragraph.paragraph_format.line_spacing = Mm(140)
     paragraph.paragraph_format.line_spacing_rule = WD_LINE_SPACING.AT_LEAST
     run = paragraph.add_run()
@@ -176,6 +178,9 @@ def _translated_chart_note(document: Document, text: str) -> None:
 
 apply_russian_display_names()
 _audit_generator.ProfessionalMeteogramRenderer = DocumentMeteogramRenderer
+_audit_generator.build_risk_signals = build_consistent_risk_signals
+_audit_generator._daily_model_metrics = consistent_daily_model_metrics
+_audit_generator._daily_presentation_point = consistent_daily_presentation_point
 _audit_generator._daily_temperature_text = daily_temperature_text
 _audit_generator._daily_wind_text = daily_wind_text
 _audit_generator._daily_pressure_text = daily_pressure_text
