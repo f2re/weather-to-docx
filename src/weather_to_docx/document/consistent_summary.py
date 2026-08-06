@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 import statistics
 from collections import Counter
-from datetime import date, datetime
+from datetime import UTC, date
 
 from weather_to_docx.analysis.consensus import RiskSignal
 from weather_to_docx.analysis.impact_scales import (
@@ -23,32 +23,6 @@ from weather_to_docx.document.weather_rules import (
 from weather_to_docx.domain.models import ForecastPoint, ForecastSeries
 
 THUNDER_CODES = frozenset({95, 96, 99})
-PRECIPITATION_CODES = frozenset(
-    {
-        51,
-        53,
-        55,
-        56,
-        57,
-        61,
-        63,
-        65,
-        66,
-        67,
-        71,
-        73,
-        75,
-        77,
-        80,
-        81,
-        82,
-        85,
-        86,
-        95,
-        96,
-        99,
-    }
-)
 DRIZZLE_CODES = frozenset({51, 53, 55, 56, 57})
 HEAVY_PRECIPITATION_CODES = frozenset({65, 67, 75, 82, 86, 96, 99})
 
@@ -57,7 +31,7 @@ def consistent_daily_model_metrics(
     forecast: ForecastSeries,
     day: date,
 ) -> DailyModelMetrics | None:
-    """Сформировать суточные метрики одной модели из тех же данных, что и график."""
+    """Сформировать суточные метрики одной модели из данных метеограммы."""
 
     points = _points_for_day(forecast, day)
     if not points:
@@ -74,7 +48,7 @@ def consistent_daily_model_metrics(
         weather_code=_daily_model_weather_code(points, precipitation),
         temperature_min=min(temperatures) if temperatures else None,
         temperature_max=max(temperatures) if temperatures else None,
-        precipitation_total=(precipitation.total_mm if precipitation else None),
+        precipitation_total=precipitation.total_mm if precipitation else None,
         wind_max=max(winds) if winds else None,
         gust_max=max(gusts) if gusts else None,
         pressure_min=min(pressure) if pressure else None,
@@ -91,7 +65,6 @@ def consistent_daily_presentation_point(
     if not metrics:
         raise ValueError("Нет модельных метрик для суточной характеристики")
 
-    code = _consensus_weather_code(metrics)
     local_time = min(
         (
             point.valid_time_local
@@ -102,17 +75,25 @@ def consistent_daily_presentation_point(
         key=lambda value: abs(value.hour - 12),
     )
     return ForecastPoint(
-        valid_time_utc=local_time.astimezone(),
+        valid_time_utc=local_time.astimezone(UTC),
         valid_time_local=local_time,
-        weather_code=code,
+        weather_code=_consensus_weather_code(metrics),
         is_day=True,
         values={},
     )
 
 
 def daily_temperature_text(metrics: list[DailyModelMetrics]) -> str:
-    lows = [item.temperature_min for item in metrics if item.temperature_min is not None]
-    highs = [item.temperature_max for item in metrics if item.temperature_max is not None]
+    lows = [
+        item.temperature_min
+        for item in metrics
+        if item.temperature_min is not None
+    ]
+    highs = [
+        item.temperature_max
+        for item in metrics
+        if item.temperature_max is not None
+    ]
     if not lows or not highs:
         return "нет данных"
 
@@ -136,7 +117,8 @@ def daily_wind_text(metrics: list[DailyModelMetrics]) -> str:
 
     if gusts:
         median_gust = statistics.median(gusts)
-        lines.append(f"порывы: медиана {median_gust:.1f} м/с".replace(".", ","))
+        gust_text = f"порывы: медиана {median_gust:.1f} м/с"
+        lines.append(gust_text.replace(".", ","))
         if max(gusts) - min(gusts) >= 3.0:
             spread = f"{min(gusts):.1f}–{max(gusts):.1f}".replace(".", ",")
             lines.append(f"по моделям {spread} м/с")
@@ -155,14 +137,20 @@ def daily_wind_text(metrics: list[DailyModelMetrics]) -> str:
     elif breezy >= required:
         lines.append("ветрено")
     elif strong_gusts:
-        lines.append(f"порывы ≥14 м/с: {strong_gusts}/{model_count} моделей")
+        lines.append(
+            f"порывы ≥14 м/с: {strong_gusts}/{model_count} моделей"
+        )
 
     return "\n".join(lines)
 
 
 def daily_pressure_text(metrics: list[DailyModelMetrics]) -> str:
     lows = [item.pressure_min for item in metrics if item.pressure_min is not None]
-    highs = [item.pressure_max for item in metrics if item.pressure_max is not None]
+    highs = [
+        item.pressure_max
+        for item in metrics
+        if item.pressure_max is not None
+    ]
     if not lows or not highs:
         return "нет данных"
 
@@ -170,11 +158,9 @@ def daily_pressure_text(metrics: list[DailyModelMetrics]) -> str:
     high = max(highs)
     text = f"{low:.0f}–{high:.0f} гПа"
     required = _majority(len(metrics))
-    low_support = sum(value < 990 for value in lows)
-    high_support = sum(value > 1030 for value in highs)
-    if low_support >= required:
+    if sum(value < 990 for value in lows) >= required:
         return f"{text}\nнизкое"
-    if high_support >= required:
+    if sum(value > 1030 for value in highs) >= required:
         return f"{text}\nвысокое"
     return text
 
@@ -199,25 +185,25 @@ def daily_precipitation_text(
         return "без осадков"
 
     median_total = statistics.median(totals)
-    low = min(totals)
-    high = max(totals)
-    lines = [_precipitation_amount_text(median_total, low, high)]
+    lines = [
+        _precipitation_amount_text(median_total, min(totals), max(totals)),
+        _consensus_precipitation_label(
+            summaries,
+            wet_count=wet_count,
+            required=required,
+            median_total=median_total,
+        ),
+        f"осадки: {wet_count}/{model_count} моделей",
+    ]
 
     thunder_count = sum(summary.thunder for summary in summaries)
     drizzle_count = sum(summary.persistent_drizzle for summary in summaries)
-    label = _consensus_precipitation_label(
-        summaries,
-        wet_count=wet_count,
-        required=required,
-        median_total=median_total,
-    )
-    lines.append(label)
-    lines.append(f"осадки: {wet_count}/{model_count} моделей")
-
     if 0 < thunder_count < required:
         lines.append(f"гроза: {thunder_count}/{model_count} моделей")
     if 0 < drizzle_count < required:
-        lines.append(f"длительная морось: {drizzle_count}/{model_count} моделей")
+        lines.append(
+            f"длительная морось: {drizzle_count}/{model_count} моделей"
+        )
     return "\n".join(lines)
 
 
@@ -230,6 +216,7 @@ def build_consistent_risk_signals(
 ) -> list[RiskSignal]:
     """Строить ключевые риски только по подтверждённым сценариям."""
 
+    del ensembles
     signals: list[RiskSignal] = []
     model_count = len(forecasts)
     if not model_count:
@@ -240,24 +227,30 @@ def build_consistent_risk_signals(
         model_data = []
         for forecast in forecasts:
             points = _points_for_day(forecast, day)
-            summary = daily_precipitation_summary(forecast, day)
             if points:
+                summary = daily_precipitation_summary(forecast, day)
                 model_data.append((forecast, points, summary))
         if not model_data:
             continue
 
         thunder = [item for item in model_data if item[2] and item[2].thunder]
         if len(thunder) >= required:
-            points = [point for _, values, _ in thunder for point in values]
+            points = [
+                point
+                for _, values, _ in thunder
+                for point in values
+                if point.weather_code in THUNDER_CODES
+            ]
             signals.append(
                 _risk_signal(
                     phenomenon="ГРОЗА",
                     day=day,
                     points=points,
-                    value_text=f"подтверждают {len(thunder)} из {model_count} моделей",
+                    value_text=(
+                        f"подтверждают {len(thunder)} из {model_count} моделей"
+                    ),
                     support_count=len(thunder),
                     model_count=model_count,
-                    ensemble_probability=None,
                     severity=90,
                 )
             )
@@ -276,26 +269,23 @@ def build_consistent_risk_signals(
                     or item[2].maximum_rate_mm_h >= 5.0
                 )
             ]
-            ensemble_probability = _ensemble_probability(ensembles, day, 5.0)
-            if (
-                len(strong) >= required
-                and median_total >= 15.0
-                and (ensemble_probability is None or ensemble_probability >= 30.0)
-            ):
+            if len(strong) >= required and median_total >= 15.0:
                 representative = min(
                     strong,
                     key=lambda item: abs(item[2].total_mm - median_total),
                 )
-                value = _risk_precipitation_value(median_total, min(totals), max(totals))
                 signals.append(
                     _risk_signal(
                         phenomenon="СИЛЬНЫЕ ОСАДКИ",
                         day=day,
                         points=representative[1],
-                        value_text=value,
+                        value_text=_risk_precipitation_value(
+                            median_total,
+                            min(totals),
+                            max(totals),
+                        ),
                         support_count=len(strong),
                         model_count=model_count,
-                        ensemble_probability=ensemble_probability,
                         severity=85 if median_total < 30 else 95,
                         peak_code="precipitation",
                     )
@@ -317,10 +307,11 @@ def build_consistent_risk_signals(
                     phenomenon="СИЛЬНЫЕ ПОРЫВЫ",
                     day=day,
                     points=representative[1],
-                    value_text=f"медиана {median_gust:.1f} м/с".replace(".", ","),
+                    value_text=(
+                        f"медиана {median_gust:.1f} м/с".replace(".", ",")
+                    ),
                     support_count=len(gust_data),
                     model_count=model_count,
-                    ensemble_probability=None,
                     severity=90 if median_gust >= 20 else 72,
                     peak_code="wind_gusts_10m",
                 )
@@ -329,40 +320,48 @@ def build_consistent_risk_signals(
         heat = []
         cold = []
         for forecast, points, _ in model_data:
-            maximum = _maximum(points, "temperature_2m")
-            minimum = _minimum(points, "temperature_2m")
-            if maximum is not None and maximum >= 30.0:
-                heat.append((forecast, points, maximum))
-            if minimum is not None and minimum <= -15.0:
-                cold.append((forecast, points, minimum))
+            maximum_temperature = _maximum(points, "temperature_2m")
+            minimum_temperature = _minimum(points, "temperature_2m")
+            if maximum_temperature is not None and maximum_temperature >= 30.0:
+                heat.append((forecast, points, maximum_temperature))
+            if minimum_temperature is not None and minimum_temperature <= -15.0:
+                cold.append((forecast, points, minimum_temperature))
         if len(heat) >= required:
             median_heat = statistics.median(item[2] for item in heat)
-            representative = min(heat, key=lambda item: abs(item[2] - median_heat))
+            representative = min(
+                heat,
+                key=lambda item: abs(item[2] - median_heat),
+            )
             signals.append(
                 _risk_signal(
                     phenomenon="ЖАРА",
                     day=day,
                     points=representative[1],
-                    value_text=f"медиана {median_heat:.1f} °C".replace(".", ","),
+                    value_text=(
+                        f"медиана {median_heat:.1f} °C".replace(".", ",")
+                    ),
                     support_count=len(heat),
                     model_count=model_count,
-                    ensemble_probability=None,
                     severity=68,
                     peak_code="temperature_2m",
                 )
             )
         if len(cold) >= required:
             median_cold = statistics.median(item[2] for item in cold)
-            representative = min(cold, key=lambda item: abs(item[2] - median_cold))
+            representative = min(
+                cold,
+                key=lambda item: abs(item[2] - median_cold),
+            )
             signals.append(
                 _risk_signal(
                     phenomenon="СИЛЬНЫЙ МОРОЗ",
                     day=day,
                     points=representative[1],
-                    value_text=f"медиана {median_cold:.1f} °C".replace(".", ","),
+                    value_text=(
+                        f"медиана {median_cold:.1f} °C".replace(".", ",")
+                    ),
                     support_count=len(cold),
                     model_count=model_count,
-                    ensemble_probability=None,
                     severity=68,
                     peak_code="temperature_2m",
                     minimum_peak=True,
@@ -373,7 +372,6 @@ def build_consistent_risk_signals(
         key=lambda signal: (
             signal.severity,
             signal.support_count / max(1, signal.model_count),
-            signal.ensemble_probability or 0.0,
         ),
         reverse=True,
     )
@@ -406,25 +404,28 @@ def _consensus_weather_code(metrics: list[DailyModelMetrics]) -> int:
     if len(metrics) == 1:
         return metrics[0].weather_code
 
-    model_count = len(metrics)
-    required = _majority(model_count)
+    required = _majority(len(metrics))
     wet = [
         item
         for item in metrics
-        if item.precipitation_total is not None and item.precipitation_total >= 0.1
+        if item.precipitation_total is not None
+        and item.precipitation_total >= 0.1
     ]
     if not wet:
         return _stable_mode([item.weather_code for item in metrics])
     if len(wet) < required:
         return SUMMARY_POSSIBLE_PRECIPITATION
 
-    thunder_count = sum(item.weather_code in THUNDER_CODES for item in wet)
-    if thunder_count >= required:
+    if sum(item.weather_code in THUNDER_CODES for item in wet) >= required:
         return SUMMARY_THUNDERSTORM
 
     totals = [item.precipitation_total or 0.0 for item in metrics]
     median_total = statistics.median(totals)
-    heavy_count = sum(item.weather_code in HEAVY_PRECIPITATION_CODES for item in wet)
+    heavy_count = sum(
+        item.weather_code in HEAVY_PRECIPITATION_CODES
+        or (item.precipitation_total or 0.0) >= 15.0
+        for item in wet
+    )
     drizzle_count = sum(item.weather_code in DRIZZLE_CODES for item in wet)
     if median_total >= 15.0 and heavy_count >= required:
         return SUMMARY_HEAVY_PRECIPITATION
@@ -445,11 +446,9 @@ def _consensus_precipitation_label(
     if wet_count < required:
         return "осадки возможны"
 
-    thunder_count = sum(summary.thunder for summary in summaries)
-    drizzle_count = sum(summary.persistent_drizzle for summary in summaries)
-    if thunder_count >= required:
+    if sum(summary.thunder for summary in summaries) >= required:
         return "гроза с осадками"
-    if drizzle_count >= required:
+    if sum(summary.persistent_drizzle for summary in summaries) >= required:
         return "длительная морось"
     if median_total >= 30.0:
         return "очень много осадков"
@@ -468,14 +467,20 @@ def _precipitation_amount_text(median: float, low: float, high: float) -> str:
         return f"{median_text} мм"
     low_text = f"{low:.1f}".replace(".", ",")
     high_text = f"{high:.1f}".replace(".", ",")
-    return f"медиана {median_text} мм\nдиапазон {low_text}–{high_text} мм"
+    return (
+        f"медиана {median_text} мм\n"
+        f"диапазон {low_text}–{high_text} мм"
+    )
 
 
 def _risk_precipitation_value(median: float, low: float, high: float) -> str:
     median_text = f"{median:.1f}".replace(".", ",")
     low_text = f"{low:.1f}".replace(".", ",")
     high_text = f"{high:.1f}".replace(".", ",")
-    return f"медиана {median_text} мм/сут; диапазон {low_text}–{high_text} мм"
+    return (
+        f"медиана {median_text} мм/сут; "
+        f"диапазон {low_text}–{high_text} мм"
+    )
 
 
 def _risk_signal(
@@ -486,15 +491,12 @@ def _risk_signal(
     value_text: str,
     support_count: int,
     model_count: int,
-    ensemble_probability: float | None,
     severity: int,
     peak_code: str | None = None,
     minimum_peak: bool = False,
 ) -> RiskSignal:
     support_ratio = support_count / max(1, model_count)
-    if support_ratio >= 0.67 and (
-        ensemble_probability is None or ensemble_probability >= 40.0
-    ):
+    if support_ratio >= 0.67:
         scenario = "Устойчивый сигнал"
         confidence = "высокая"
     else:
@@ -504,11 +506,11 @@ def _risk_signal(
     ordered = sorted(points, key=lambda point: point.valid_time_local)
     peak = None
     if peak_code:
-        candidates = [
-            (point, _number(point.raw(peak_code)))
-            for point in ordered
-            if _number(point.raw(peak_code)) is not None
-        ]
+        candidates = []
+        for point in ordered:
+            value = _number(point.raw(peak_code))
+            if value is not None:
+                candidates.append((point, value))
         if candidates:
             peak = (
                 min(candidates, key=lambda item: item[1])[0]
@@ -529,34 +531,9 @@ def _risk_signal(
         value_text=value_text,
         support_count=support_count,
         model_count=model_count,
-        ensemble_probability=ensemble_probability,
+        ensemble_probability=None,
         severity=severity,
     )
-
-
-def _ensemble_probability(
-    ensembles: list[ForecastSeries],
-    day: date,
-    threshold_mm: float,
-) -> float | None:
-    token = f"{threshold_mm:g}".replace(".", "p")
-    code = f"precipitation_probability_ge_{token}mm"
-    values = []
-    coverages = []
-    for forecast in ensembles:
-        for point in _points_for_day(forecast, day):
-            value = _number(point.raw(code))
-            if value is not None:
-                values.append(value)
-                coverage = _number(point.raw("ensemble_member_coverage"))
-                if coverage is not None:
-                    coverages.append(coverage)
-    if not values:
-        return None
-    probability = max(values)
-    if coverages and min(coverages) < 80.0:
-        probability *= min(coverages) / 100.0
-    return probability
 
 
 def _dry_weather_code(points: list[ForecastPoint]) -> int:
@@ -581,15 +558,18 @@ def _dry_weather_code(points: list[ForecastPoint]) -> int:
 def _stable_mode(codes: list[int]) -> int:
     counts = Counter(codes)
     best_count = max(counts.values())
-    candidates = [code for code, count in counts.items() if count == best_count]
-    if len(candidates) == 1:
-        return candidates[0]
-    ordered = sorted(candidates)
-    return ordered[(len(ordered) - 1) // 2]
+    candidates = sorted(
+        code for code, count in counts.items() if count == best_count
+    )
+    return candidates[(len(candidates) - 1) // 2]
 
 
 def _points_for_day(forecast: ForecastSeries, day: date) -> list[ForecastPoint]:
-    return [point for point in forecast.points if point.valid_time_local.date() == day]
+    return [
+        point
+        for point in forecast.points
+        if point.valid_time_local.date() == day
+    ]
 
 
 def _values(points: list[ForecastPoint], code: str) -> list[float]:
