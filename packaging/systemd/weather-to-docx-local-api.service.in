@@ -1,0 +1,36 @@
+[Unit]
+Description=Weather to DOCX local HTTP API
+After=network.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Group=@SERVICE_GROUP@
+WorkingDirectory=@DATA_DIR@
+Environment=WTD_DATA_DIR=@DATA_DIR@
+Environment=WTD_API_HOST=@API_HOST@
+Environment=WTD_API_PORT=@API_PORT@
+Environment=MPLBACKEND=Agg
+Environment=MPLCONFIGDIR=@DATA_DIR@/cache/matplotlib
+ExecStart=@COMMAND@ api --host @API_HOST@ --port @API_PORT@
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=30s
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=full
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+ReadWritePaths=@DATA_DIR@
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

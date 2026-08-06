@@ -181,15 +181,20 @@ python -m pip install -e '.[dev]'
 weather-to-docx init
 ```
 
-API:
+API и worker одной командой:
+
+```bash
+./scripts/run-local.sh
+```
+
+Скрипт сохраняет локальные данные в `var/runtime`, запускает worker в фоне и
+останавливает его вместе с API. Параметры адреса и каталога данных доступны как
+`--host`, `--port` и `--data-dir`; полный список показывает `./scripts/run-local.sh --help`.
+
+Отдельный запуск остаётся доступен:
 
 ```bash
 weather-to-docx-api
-```
-
-Worker:
-
-```bash
 weather-to-docx worker --poll-interval 5
 ```
 
@@ -198,6 +203,28 @@ weather-to-docx worker --poll-interval 5
 ```text
 http://127.0.0.1:8080/
 ```
+
+## Запуск checkout как systemd-службы
+
+Для постоянного запуска из текущего checkout после создания `.venv` выполните:
+
+```bash
+sudo ./scripts/install-service.sh
+```
+
+Скрипт устанавливает и немедленно запускает `weather-to-docx-local-api` и
+`weather-to-docx-local-worker` от пользователя, вызвавшего `sudo`. По умолчанию
+данные службы находятся в `var/service`; путь, пользователь, группа, порт и
+интервал worker можно изменить параметрами. Справка и проверка состояния:
+
+```bash
+./scripts/install-service.sh --help
+sudo systemctl status weather-to-docx-local-api weather-to-docx-local-worker
+```
+
+Для автономной production-установки используйте `setup.sh` из собранного
+комплекта: он устанавливает отдельные production-службы `weather-to-docx-api`
+и `weather-to-docx-worker` в `/opt/weather-to-docx`.
 
 ## Обновление установленной системы
 
