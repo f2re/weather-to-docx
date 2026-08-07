@@ -260,7 +260,9 @@ def test_report_is_risk_first_and_uses_graph_only_appendices(tmp_path: Path) -> 
     assert "Уверенность" not in text
     assert "уверенность:" not in text
     assert "медиана" not in text
-    assert "Не использованы в сводке из-за неполных данных: NOAA GFS" in text
+    assert "Не включены в сводку: недостаточно данных — NOAA GFS" in text
+    assert "доступно 11 % нужных параметров" in text
+    assert "ключевых полей" not in text
     assert "Метеограмма модели ECMWF IFS" in text
     assert "Метеограмма модели ICON" in text
     assert "Метеограмма модели GDPS" in text
