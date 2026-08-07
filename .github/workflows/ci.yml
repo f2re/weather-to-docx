@@ -140,11 +140,30 @@ jobs:
           import runpy
           from pathlib import Path
 
+          from weather_to_docx.document.scientific_generator import ScientificDocumentGenerator
+          from weather_to_docx.domain.models import DocumentOptions
+
           namespace = runpy.run_path("tests/test_scientific_document.py")
           target = Path("var/ci-ensemble-sample")
           target.mkdir(parents=True, exist_ok=True)
-          output = namespace["_generate_report"](target)
-          print(output)
+
+          expert_output = namespace["_generate_report"](target)
+          print(expert_output)
+
+          location = namespace["_location"]()
+          brief_output = target / "brief-ensemble-report.docx"
+          ScientificDocumentGenerator(target / "brief-icons").generate(
+              location=location,
+              series=namespace["_report_series"](location),
+              options=DocumentOptions(
+                  document_mode="brief",
+                  include_meteograms=False,
+                  page_size="A4",
+                  parameter_profile="operational",
+              ),
+              output_path=brief_output,
+          )
+          print(brief_output)
           PY
 
       - name: Проверить риски, график и физический рендер
