@@ -6,8 +6,12 @@ from datetime import date
 
 from weather_to_docx.analysis.impact_scales import daily_precipitation_summary
 from weather_to_docx.analysis.semantic_policy import strict_majority
+from weather_to_docx.document import audit_generator as _audit_generator
+from weather_to_docx.document import compact_generator as _compact_generator
 from weather_to_docx.document.compact_generator import DailyModelMetrics
+from weather_to_docx.document.source_names import source_display_name
 from weather_to_docx.domain.models import ForecastPoint, ForecastSeries
+from weather_to_docx.utils.files import safe_filename
 
 
 def daily_precipitation_text(
@@ -303,6 +307,76 @@ def _number(value) -> float | None:
 
 def _fmt(value: float, precision: int = 1) -> str:
     return f"{value:.{precision}f}".replace(".", ",")
+
+
+_ORIGINAL_SOURCE_FRESHNESS = (
+    _audit_generator.ScientificDocumentGenerator._add_source_freshness
+)
+
+
+def _plain_source_freshness(document, forecast: ForecastSeries) -> None:
+    _ORIGINAL_SOURCE_FRESHNESS(document, forecast)
+    paragraph = document.paragraphs[-1]
+    for run in paragraph.runs:
+        run.text = (
+            run.text.replace(
+                "Цикл: цикл не передан поставщиком",
+                "Расчёт модели: время запуска не указано",
+            )
+            .replace("Цикл:", "Расчёт модели:")
+            .replace("свежие данные", "актуальные данные")
+        )
+
+
+def _plain_base_ensemble_graph_page(
+    self,
+    document,
+    forecast: ForecastSeries,
+    renderer,
+    temporary_path,
+) -> None:
+    heading = document.add_paragraph()
+    heading.paragraph_format.space_after = _audit_generator.Pt(1)
+    run = heading.add_run(f"Ансамбль — {source_display_name(forecast)}")
+    run.bold = True
+    run.font.name = "Liberation Sans"
+    run.font.size = _audit_generator.Pt(12)
+    self._add_source_freshness(document, forecast)
+
+    image_path = temporary_path / (
+        safe_filename(f"ensemble_{forecast.source.source_id}") + ".png"
+    )
+    renderer.render_ensemble(
+        forecast,
+        image_path,
+        title=(
+            f"{source_display_name(forecast)} — разброс вариантов прогноза"
+        ),
+    )
+    self._add_meteogram_image(
+        document,
+        image_path,
+        description=(
+            f"Метеограмма вариантов ансамбля {source_display_name(forecast)}: "
+            "типичное значение и разброс вариантов"
+        ),
+    )
+    self._add_chart_note(
+        document,
+        "Тёмная полоса — 25–75-й процентили, светлая — 10–90-й. "
+        "Вероятности осадков относятся к указанным порогам и интервалам.",
+    )
+
+
+# Эти подмены изменяют только представление. Расчётные медианы, квантили и
+# внутренние оценки остаются прежними.
+_compact_generator._detail_temperature_text = detail_temperature_text
+_audit_generator.ScientificDocumentGenerator._add_source_freshness = staticmethod(
+    _plain_source_freshness
+)
+_audit_generator.ScientificDocumentGenerator._add_ensemble_graph_page = (
+    _plain_base_ensemble_graph_page
+)
 
 
 __all__ = [
