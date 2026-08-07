@@ -125,7 +125,7 @@ def test_persistent_operator_workflow_after_restarts(tmp_path: Path) -> None:
             assert expected_name in text
             assert "Ключевые риски" in text
             assert "Прогноз по дням" in text
-            assert "Прогноз по контрольным срокам" in text
+            assert "Прогноз по времени" in text
             assert "Согласованность" not in text
             assert artifact["metadata"]["risk_section"] is True
             assert "Подробный метеорологический отчёт" not in text
