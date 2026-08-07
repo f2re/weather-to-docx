@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 import statistics
 from datetime import date
 
@@ -312,6 +313,9 @@ def _fmt(value: float, precision: int = 1) -> str:
 _ORIGINAL_SOURCE_FRESHNESS = (
     _audit_generator.ScientificDocumentGenerator._add_source_freshness
 )
+_ORIGINAL_COMPACT_HEADER = (
+    _compact_generator.ScientificDocumentGenerator._add_compact_header
+)
 
 
 def _plain_source_freshness(document, forecast: ForecastSeries) -> None:
@@ -326,6 +330,44 @@ def _plain_source_freshness(document, forecast: ForecastSeries) -> None:
             .replace("Цикл:", "Расчёт модели:")
             .replace("свежие данные", "актуальные данные")
         )
+
+
+def _plain_base_compact_header(
+    self,
+    document,
+    location,
+    selection,
+    ensembles,
+    report_dates,
+    options,
+) -> None:
+    _ORIGINAL_COMPACT_HEADER(
+        self,
+        document,
+        location,
+        selection,
+        ensembles,
+        report_dates,
+        options,
+    )
+    for paragraph in document.paragraphs:
+        if "Не использованы в сводке из-за неполных данных:" not in paragraph.text:
+            continue
+        text = paragraph.text.replace(
+            "Не использованы в сводке из-за неполных данных: ",
+            "Не включены в сводку: недостаточно данных — ",
+        ).replace("ключевых полей", "нужных параметров")
+        text = re.sub(
+            r"\((\d+) % нужных параметров\)",
+            r"(доступно \1 % нужных параметров)",
+            text,
+        )
+        if paragraph.runs:
+            paragraph.runs[0].text = text
+            for run in paragraph.runs[1:]:
+                run.text = ""
+        else:
+            paragraph.add_run(text)
 
 
 def _plain_base_ensemble_graph_page(
@@ -371,6 +413,9 @@ def _plain_base_ensemble_graph_page(
 # Эти подмены изменяют только представление. Расчётные медианы, квантили и
 # внутренние оценки остаются прежними.
 _compact_generator._detail_temperature_text = detail_temperature_text
+_compact_generator.ScientificDocumentGenerator._add_compact_header = (
+    _plain_base_compact_header
+)
 _audit_generator.ScientificDocumentGenerator._add_source_freshness = staticmethod(
     _plain_source_freshness
 )
