@@ -18,9 +18,7 @@ from weather_to_docx.document.consistent_summary import (
     build_consistent_risk_signals,
     daily_pressure_text,
 )
-from weather_to_docx.document.scientific_generator import (
-    ScientificDocumentGenerator,
-)
+from weather_to_docx.document.scientific_generator import ScientificDocumentGenerator
 from weather_to_docx.document.weather_rules import derive_weather_code
 from weather_to_docx.domain.models import (
     DocumentOptions,
@@ -188,10 +186,7 @@ def test_gfs_cumulative_precipitation_gets_non_overlapping_intervals() -> None:
 
     GfsNomadsSource._derive_interval_precipitation(points)
 
-    measurements = [
-        point.measurement("precipitation")
-        for point in points
-    ]
+    measurements = [point.measurement("precipitation") for point in points]
     assert [measurement.value for measurement in measurements] == [
         2.0,
         3.0,
@@ -200,12 +195,12 @@ def test_gfs_cumulative_precipitation_gets_non_overlapping_intervals() -> None:
     assert [
         measurement.source_start_step for measurement in measurements
     ] == [0, 3, 6]
-    assert [
-        measurement.source_end_step for measurement in measurements
-    ] == [3, 6, 9]
-    assert [
-        measurement.accumulation_hours for measurement in measurements
-    ] == [3.0, 3.0, 3.0]
+    assert [measurement.source_end_step for measurement in measurements] == [3, 6, 9]
+    assert [measurement.accumulation_hours for measurement in measurements] == [
+        3.0,
+        3.0,
+        3.0,
+    ]
     assert daily_precipitation_total(points) == 9.0
 
     rates = normalise_precipitation_rates(
@@ -245,30 +240,18 @@ def test_pressure_main_value_is_central_not_extreme_envelope() -> None:
 
 
 def test_missing_precipitation_is_not_silently_treated_as_zero() -> None:
-    from weather_to_docx.analysis.impact_scales import (
-        daily_precipitation_summary,
-    )
-    from weather_to_docx.document.consistent_summary import (
-        daily_precipitation_text,
-    )
+    from weather_to_docx.analysis.impact_scales import daily_precipitation_summary
+    from weather_to_docx.document.consistent_summary import daily_precipitation_text
 
     dry = _series("dry", precipitation=0.0)
     missing = _series("missing", include_precipitation=False)
 
-    assert daily_precipitation_summary(
-        missing,
-        date(2026, 8, 10),
-    ) is None
-    text = daily_precipitation_text(
-        [dry, missing],
-        date(2026, 8, 10),
-    )
+    assert daily_precipitation_summary(missing, date(2026, 8, 10)) is None
+    text = daily_precipitation_text([dry, missing], date(2026, 8, 10))
     assert "нет данных об осадках: 1/2 моделей" in text
 
 
-def test_brief_document_marks_single_model_risks_as_potential(
-    tmp_path: Path,
-) -> None:
+def test_brief_document_hides_internal_confidence_terms(tmp_path: Path) -> None:
     forecast = asyncio.run(
         DemoSource().fetch(
             LOCATION,
@@ -290,6 +273,8 @@ def test_brief_document_marks_single_model_risks_as_potential(
 
     text = _text(Document(output))
     assert "Ключевые риски" in text
-    assert "Сценарий одной модели" in text
-    assert "уверенность: не оценивается" in text
+    assert "расчёт одной модели" in text
+    assert "Сценарий одной модели" not in text
     assert "Устойчивый сигнал" not in text
+    assert "уверенность" not in text.lower()
+    assert "1 из 1 моделей" not in text
