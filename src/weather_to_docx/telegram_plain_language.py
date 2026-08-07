@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from weather_to_docx.telegram_queue_bot import TelegramQueueBot
 
+_ORIGINAL_ENQUEUE_AND_SEND = TelegramQueueBot._enqueue_and_send
+
 
 async def _show_settings(self, update, context) -> None:
     if not await self._authorize(update):
@@ -20,6 +22,19 @@ async def _show_settings(self, update, context) -> None:
     )
 
 
+async def _enqueue_and_send(self, update, context, parsed) -> None:
+    worker = self.repository.worker_status(
+        max_age_seconds=self.settings.worker_online_max_age_seconds
+    )
+    if not worker["online"]:
+        await update.effective_message.reply_text(
+            "Обработчик заданий не отвечает. Прогноз пока не запущен. "
+            "Проверьте службу weather-to-docx-worker."
+        )
+        return
+    await _ORIGINAL_ENQUEUE_AND_SEND(self, update, context, parsed)
+
+
 def _caption(parsed, result) -> str:
     lines = [
         f"Точек: {len(parsed.locations)}",
@@ -34,6 +49,7 @@ def _caption(parsed, result) -> str:
 
 def install_plain_language_messages() -> None:
     TelegramQueueBot.show_settings = _show_settings
+    TelegramQueueBot._enqueue_and_send = _enqueue_and_send
     TelegramQueueBot._caption = staticmethod(_caption)
 
 
