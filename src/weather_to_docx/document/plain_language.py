@@ -131,6 +131,28 @@ def daily_wind_text(metrics: list[DailyModelMetrics]) -> str:
     return "\n".join(lines)
 
 
+def detail_temperature_text(points: list[ForecastPoint]) -> str:
+    values = [
+        value
+        for point in points
+        if (value := _number(point.raw("temperature_2m"))) is not None
+    ]
+    if not values:
+        return "нет данных"
+    if len(values) == 1:
+        return f"{_fmt(values[0])} °C"
+
+    typical = statistics.median(values)
+    low = min(values)
+    high = max(values)
+    if high - low < 0.2:
+        return f"около {_fmt(typical)} °C"
+    return (
+        f"обычно {_fmt(typical)} °C\n"
+        f"по моделям {_fmt(low)}…{_fmt(high)} °C"
+    )
+
+
 def detail_precipitation_text(points: list[ForecastPoint]) -> str:
     available = [
         (point, value)
@@ -288,6 +310,7 @@ __all__ = [
     "daily_precipitation_text",
     "daily_wind_text",
     "detail_precipitation_text",
+    "detail_temperature_text",
     "detail_wind_text",
     "ensemble_members_text",
     "ensemble_precipitation_text",
