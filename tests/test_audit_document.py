@@ -66,7 +66,7 @@ def test_brief_single_model_hides_false_agreement_column(tmp_path: Path) -> None
     assert "Ключевые риски" in text
     assert "Согласованность" not in text
     assert "одна модель" not in text
-    assert "Прогноз по контрольным срокам" in text
+    assert "Прогноз по времени" in text
     assert not _large_meteograms(document)
 
 
