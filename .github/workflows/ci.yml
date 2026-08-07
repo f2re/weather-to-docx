@@ -96,6 +96,7 @@ jobs:
               "weather_to_docx/ensemble/science.py",
               "weather_to_docx/document/scientific_generator.py",
               "weather_to_docx/document/audit_generator.py",
+              "weather_to_docx/document/plain_language.py",
               "weather_to_docx/document/render_validation.py",
               "weather_to_docx/document/verification.py",
               "weather_to_docx/plotting/professional_meteogram.py",
@@ -107,6 +108,7 @@ jobs:
               "weather_to_docx/geocoding/timezone.py",
               "weather_to_docx/storage/jobs_v2.py",
               "weather_to_docx/telegram_queue_bot.py",
+              "weather_to_docx/telegram_plain_language.py",
               "weather_to_docx/runtime_check.py",
               "weather_to_docx/api_entrypoint.py",
               "weather_to_docx/telegram_entrypoint.py",
@@ -127,6 +129,23 @@ jobs:
           MPLBACKEND: Agg
           MPLCONFIGDIR: /tmp/weather-to-docx-matplotlib-sample
         run: weather-to-docx sample --output var/ci-sample --hours 24
+
+      - name: Сформировать пример с ансамблем
+        if: matrix.python-version == '3.11'
+        env:
+          MPLBACKEND: Agg
+          MPLCONFIGDIR: /tmp/weather-to-docx-matplotlib-ensemble-sample
+        run: |
+          python - <<'PY'
+          import runpy
+          from pathlib import Path
+
+          namespace = runpy.run_path("tests/test_scientific_document.py")
+          target = Path("var/ci-ensemble-sample")
+          target.mkdir(parents=True, exist_ok=True)
+          output = namespace["_generate_report"](target)
+          print(output)
+          PY
 
       - name: Проверить риски, график и физический рендер
         env:
@@ -193,5 +212,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sample-docx
-          path: var/ci-sample/**/*
+          path: |
+            var/ci-sample/**/*
+            var/ci-ensemble-sample/**/*
           if-no-files-found: error
