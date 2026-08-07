@@ -92,7 +92,8 @@ def test_short_expert_document_uses_dynamic_layout_and_graph_only_page(
     assert inspection.has_risk_section
     assert "Метеограмма модели Синтетические данные" in text
     assert "формосохраняющим методом PCHIP" not in text
-    assert "Цикл:" in text
+    assert "Расчёт модели:" in text
+    assert "Цикл:" not in text
     assert len(document.tables) == 3
 
 
