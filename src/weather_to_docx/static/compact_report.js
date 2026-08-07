@@ -95,8 +95,8 @@ function renderMeteogramRuntimeStatus() {
   if (!checkbox || currentDocumentMode() === "brief") return;
   checkbox.disabled = !ready;
   checkbox.title = ready
-    ? "Графики будут встроены и структурно проверены"
-    : "Сервер запущен из старого runtime. Выполните scripts/update.sh";
+    ? "Графики будут встроены и проверены"
+    : "Сервер использует старую версию компонентов. Выполните scripts/update.sh";
 }
 
 function selectedSourceCounts() {
@@ -116,25 +116,25 @@ function renderDocumentPlan() {
   const summaryPages = days <= 3 ? 1 : 2;
   let pages = summaryPages;
   const sections = [
-    "карточки ключевых рисков",
+    "важные риски",
     "сводка по дням",
-    "контрольные сроки",
+    "прогноз по времени",
   ];
   if (mode === "expert") {
     pages += count.deterministic + count.ensemble;
-    sections.push(`${count.deterministic} метеограмм моделей`);
-    if (count.ensemble) sections.push("ансамблевая метеограмма");
+    sections.push(`${count.deterministic} метеограмм основных моделей`);
+    if (count.ensemble) sections.push("график вариантов ансамбля");
   } else if (mode === "full") {
     pages += count.deterministic * 2 + count.ensemble * 2;
-    sections.push("метеограммы и отдельные модельные таблицы");
+    sections.push("метеограммы и отдельные таблицы по моделям");
   } else if (count.ensemble) {
-    sections.push("компактная ансамблевая таблица");
+    sections.push("таблица вариантов ансамбля");
   }
   element.innerHTML = `
     <div class="plan-pages"><strong>Ориентировочно ${pages} стр.</strong><span>${modeName(mode)}</span></div>
     <div class="plan-strip">
       <span>1</span><b>Риски и сводка</b>
-      <span>${summaryPages}</span><b>Контрольные сроки</b>
+      <span>${summaryPages}</span><b>Прогноз по времени</b>
       ${mode === "brief" ? "" : `<span>${pages}</span><b>Графики моделей</b>`}
     </div>
     <p>${sections.map(escapeHtml).join(" · ")}</p>`;
@@ -142,9 +142,9 @@ function renderDocumentPlan() {
 
 function modeName(mode) {
   return {
-    brief: "Краткий режим",
-    expert: "Экспертный режим",
-    full: "Полный режим",
+    brief: "Краткий",
+    expert: "С графиками",
+    full: "Подробный",
   }[mode] || mode;
 }
 
@@ -221,7 +221,7 @@ async function createProfessionalJob() {
     await api("/api/v1/jobs", {method: "POST", body: JSON.stringify(payload)});
     await loadJobs();
     decorateJobs();
-    toast(`Создан ${modeName(mode).toLowerCase()}.`);
+    toast(`Создан документ: ${modeName(mode).toLowerCase()}.`);
   } catch (error) {
     reportError(error);
   } finally {

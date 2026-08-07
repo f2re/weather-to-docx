@@ -66,7 +66,7 @@ def test_brief_single_model_hides_false_agreement_column(tmp_path: Path) -> None
     assert "Ключевые риски" in text
     assert "Согласованность" not in text
     assert "одна модель" not in text
-    assert "Прогноз по контрольным срокам" in text
+    assert "Прогноз по времени" in text
     assert not _large_meteograms(document)
 
 
@@ -92,7 +92,8 @@ def test_short_expert_document_uses_dynamic_layout_and_graph_only_page(
     assert inspection.has_risk_section
     assert "Метеограмма модели Синтетические данные" in text
     assert "формосохраняющим методом PCHIP" not in text
-    assert "Цикл:" in text
+    assert "Расчёт модели:" in text
+    assert "Цикл:" not in text
     assert len(document.tables) == 3
 
 

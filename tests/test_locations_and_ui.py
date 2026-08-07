@@ -27,9 +27,12 @@ def test_operator_interface_and_static_assets(tmp_path: Path) -> None:
     response = client.get("/")
     assert response.status_code == 200
     assert "Weather to DOCX" in response.text
-    assert "Оперативный прогноз, риски и профессиональные метеограммы" in response.text
-    assert "Детерминированные модели" in response.text
+    assert "Прогноз по нескольким моделям с наглядными метеограммами" in response.text
+    assert "Основные модели" in response.text
+    assert "Детерминированные модели" not in response.text
     assert "Одиночный сценарий не выдаётся" in response.text
+    assert "Пороги осадков, мм" not in response.text
+    assert 'id="precipitationThresholds" type="hidden"' in response.text
     assert "documentMode" in response.text
     assert "documentPlan" in response.text
     assert "includeMeteograms" in response.text

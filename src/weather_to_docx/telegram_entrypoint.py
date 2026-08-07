@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from weather_to_docx.logging_config import configure_logging
 from weather_to_docx.settings import Settings
+from weather_to_docx.telegram_plain_language import install_plain_language_messages
 from weather_to_docx.telegram_queue_bot import run_telegram_bot
 
 
@@ -9,6 +10,7 @@ def main() -> None:
     settings = Settings()
     settings.ensure_directories()
     configure_logging(settings.log_level)
+    install_plain_language_messages()
     run_telegram_bot(settings)
 
 
