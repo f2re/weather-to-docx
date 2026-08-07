@@ -256,13 +256,15 @@ def test_report_is_risk_first_and_uses_graph_only_appendices(tmp_path: Path) -> 
     assert len(document.tables) == 3
     assert "Ключевые риски" in text
     assert "Прогноз по дням" in text
-    assert "Прогноз по контрольным срокам" in text
-    assert "Уверенность" in text
+    assert "Прогноз по времени" in text
+    assert "Уверенность" not in text
+    assert "уверенность:" not in text
+    assert "медиана" not in text
     assert "Не использованы в сводке из-за неполных данных: NOAA GFS" in text
     assert "Метеограмма модели ECMWF IFS" in text
     assert "Метеограмма модели ICON" in text
     assert "Метеограмма модели GDPS" in text
-    assert "Ансамблевая оценка — GEFS" in text
+    assert "Ансамбль — GEFS" in text
     assert "формосохраняющим методом PCHIP" not in text
     assert "Согласованность" not in text
 
@@ -318,7 +320,12 @@ def test_report_without_meteograms_keeps_compact_ensemble_summary(tmp_path: Path
         output_path=output,
     )
     document = Document(output)
+    text = _all_text(document)
     assert len(document.tables) == 4
+    assert "Ансамбль: разброс вариантов прогноза" in text
+    assert "% вариантов" in text
+    assert "10–90 %" not in text
+    assert "Члены" not in text
     assert not [
         shape
         for shape in document.inline_shapes
