@@ -252,8 +252,8 @@ async function refreshReliability() {
 
   const status = document.getElementById("reliabilityStatus");
   const workerText = diagnostics.worker?.online
-    ? `Worker в сети · отклик ${diagnostics.worker.age_seconds ?? 0} с`
-    : "Worker не отвечает — новые задания будут ожидать обработки";
+    ? `Обработчик заданий работает · отклик ${diagnostics.worker.age_seconds ?? 0} с`
+    : "Обработчик заданий не отвечает — новые задания будут ждать запуска";
   const queue = diagnostics.queue || {};
   status.innerHTML = `
     <div class="reliability-line ${diagnostics.worker?.online ? "ok" : "error"}">
@@ -271,7 +271,7 @@ async function refreshReliability() {
   const createButton = document.getElementById("createJob");
   if (!reliabilityState.workerOnline) {
     createButton.disabled = true;
-    createButton.title = "Запустите weather-to-docx-worker";
+    createButton.title = "Запустите службу обработки заданий weather-to-docx-worker";
   } else if (createButton.textContent === "Сформировать документы") {
     createButton.disabled = false;
     createButton.title = "";
@@ -286,7 +286,7 @@ function validateJobBeforeCreate(event) {
     event.preventDefault();
     event.stopImmediatePropagation();
     reportError(new Error(
-      "Worker не отвечает. Проверьте службу weather-to-docx-worker, затем обновите страницу.",
+      "Обработчик заданий не отвечает. Запустите службу weather-to-docx-worker, затем обновите страницу.",
     ));
     return;
   }
@@ -296,7 +296,7 @@ function validateJobBeforeCreate(event) {
     event.preventDefault();
     event.stopImmediatePropagation();
     reportError(new Error(
-      "Расширенная таблица не помещается в A4. Выберите оперативный профиль или формат A3.",
+      "Расширенная таблица не помещается в A4. Выберите формат A3."
     ));
   }
 }
@@ -318,8 +318,8 @@ function updateHorizonSummary() {
     .filter((item) => item.horizon_days < requested)
     .map((item) => `${item.model}: ${item.horizon_days} сут.`);
   document.getElementById("horizonSummary").textContent = limited.length
-    ? `Ограничения источников: ${limited.join(" · ")}`
-    : `Все выбранные источники покрывают ${requested} сут.`;
+    ? `Ограничения моделей: ${limited.join(" · ")}`
+    : `Все выбранные модели покрывают ${requested} сут.`;
 }
 
 function validatePageSize() {
@@ -327,7 +327,7 @@ function validatePageSize() {
   const profile = document.getElementById("parameterProfile").value;
   if (pageSize === "A4" && profile !== "operational") {
     document.getElementById("horizonSummary").textContent =
-      "A4 допускается только для оперативного профиля. Для расширенного отчёта выберите A3.";
+      "Расширенная таблица требует формата A3.";
   } else {
     updateHorizonSummary();
   }
