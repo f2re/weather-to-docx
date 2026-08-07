@@ -5,6 +5,8 @@ import re
 import statistics
 from datetime import date
 
+from docx import Document
+
 from weather_to_docx.analysis.impact_scales import daily_precipitation_summary
 from weather_to_docx.analysis.semantic_policy import strict_majority
 from weather_to_docx.document import audit_generator as _audit_generator
@@ -173,7 +175,7 @@ def detail_precipitation_text(points: list[ForecastPoint]) -> str:
         return "нет"
 
     interval = _common_interval_hours([point for point, _ in available])
-    suffix = f" за {interval:g} ч" if interval is not None else " за интервал"
+    suffix = f" за {interval:g} ч" if interval is not None else ""
     if len(values) == 1:
         return f"{_fmt(values[0])} мм{suffix}"
 
@@ -249,7 +251,7 @@ def ensemble_precipitation_text(points: list[ForecastPoint]) -> str:
     if intervals and max(intervals) - min(intervals) < 1e-6:
         lines.append(f"за {intervals[0]:g} ч")
     else:
-        lines.append("за один расчётный интервал")
+        lines.append("за один шаг прогноза")
     return "\n".join(lines)
 
 
@@ -310,12 +312,25 @@ def _fmt(value: float, precision: int = 1) -> str:
     return f"{value:.{precision}f}".replace(".", ",")
 
 
+def _replace_paragraph_text(paragraph, text: str) -> None:
+    if paragraph.runs:
+        paragraph.runs[0].text = text
+        for run in paragraph.runs[1:]:
+            run.text = ""
+    else:
+        paragraph.add_run(text)
+
+
 _ORIGINAL_SOURCE_FRESHNESS = (
     _audit_generator.ScientificDocumentGenerator._add_source_freshness
 )
 _ORIGINAL_COMPACT_HEADER = (
     _compact_generator.ScientificDocumentGenerator._add_compact_header
 )
+_ORIGINAL_COMPACT_NOTES = (
+    _compact_generator.ScientificDocumentGenerator._add_compact_notes
+)
+_ORIGINAL_GENERATE = _audit_generator.ScientificDocumentGenerator.generate
 
 
 def _plain_source_freshness(document, forecast: ForecastSeries) -> None:
@@ -362,12 +377,20 @@ def _plain_base_compact_header(
             r"(доступно \1 % нужных параметров)",
             text,
         )
-        if paragraph.runs:
-            paragraph.runs[0].text = text
-            for run in paragraph.runs[1:]:
-                run.text = ""
-        else:
-            paragraph.add_run(text)
+        _replace_paragraph_text(paragraph, text)
+
+
+def _plain_base_compact_notes(document, selection, ensembles) -> None:
+    _ORIGINAL_COMPACT_NOTES(document, selection, ensembles)
+    for paragraph in document.paragraphs:
+        if "Неполные модельные ряды в расчёт сводки не включались." in paragraph.text:
+            _replace_paragraph_text(
+                paragraph,
+                paragraph.text.replace(
+                    "Неполные модельные ряды в расчёт сводки не включались.",
+                    "Модели с недостаточными данными в сводку не включались.",
+                ),
+            )
 
 
 def _plain_base_ensemble_graph_page(
@@ -410,11 +433,66 @@ def _plain_base_ensemble_graph_page(
     )
 
 
+def _plain_generate(
+    self,
+    *,
+    location,
+    series,
+    options,
+    output_path,
+):
+    result = _ORIGINAL_GENERATE(
+        self,
+        location=location,
+        series=series,
+        options=options,
+        output_path=output_path,
+    )
+    document = Document(result)
+    changed = False
+
+    for paragraph in list(document.paragraphs):
+        if paragraph.text.startswith("Ансамбль — это много вариантов одного расчёта."):
+            _replace_paragraph_text(
+                paragraph,
+                "Ансамбль — это много вариантов одного расчёта. Он показывает, "
+                "как может меняться прогноз. Например, 5 % вариантов — это "
+                "примерно 5 из 100. Для осадков процент относится к указанной "
+                "сумме за один шаг прогноза, а не за сутки.",
+            )
+            changed = True
+        elif paragraph.text.startswith("Например, 5 % вариантов означает:"):
+            paragraph._element.getparent().remove(paragraph._element)
+            changed = True
+
+    replacements = {
+        "Температура\nу центральных 80 % вариантов":
+            "Температура\nу 8 из 10 вариантов",
+        "Порывы\n90 % вариантов не выше":
+            "Порывы\nу 9 из 10 вариантов не выше",
+    }
+    for table in document.tables:
+        for row in table.rows:
+            for cell in row.cells:
+                for paragraph in cell.paragraphs:
+                    new_text = replacements.get(paragraph.text)
+                    if new_text is not None:
+                        _replace_paragraph_text(paragraph, new_text)
+                        changed = True
+
+    if changed:
+        document.save(result)
+    return result
+
+
 # Эти подмены изменяют только представление. Расчётные медианы, квантили и
 # внутренние оценки остаются прежними.
 _compact_generator._detail_temperature_text = detail_temperature_text
 _compact_generator.ScientificDocumentGenerator._add_compact_header = (
     _plain_base_compact_header
+)
+_compact_generator.ScientificDocumentGenerator._add_compact_notes = staticmethod(
+    _plain_base_compact_notes
 )
 _audit_generator.ScientificDocumentGenerator._add_source_freshness = staticmethod(
     _plain_source_freshness
@@ -422,6 +500,7 @@ _audit_generator.ScientificDocumentGenerator._add_source_freshness = staticmetho
 _audit_generator.ScientificDocumentGenerator._add_ensemble_graph_page = (
     _plain_base_ensemble_graph_page
 )
+_audit_generator.ScientificDocumentGenerator.generate = _plain_generate
 
 
 __all__ = [
