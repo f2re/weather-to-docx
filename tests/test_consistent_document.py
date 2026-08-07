@@ -80,7 +80,7 @@ def _document_text(path: Path) -> str:
     )
 
 
-def test_generated_document_uses_median_not_worst_model(tmp_path: Path) -> None:
+def test_generated_document_uses_central_value_not_worst_model(tmp_path: Path) -> None:
     forecasts = [
         _series("GFS", 2.5, 61),
         _series("ICON", 3.9, 61),
@@ -101,9 +101,9 @@ def test_generated_document_uses_median_not_worst_model(tmp_path: Path) -> None:
     )
     text = _document_text(output)
 
-    assert "медиана 11,2 мм" in text
-    assert "диапазон 2,5–38,2 мм" in text
-    assert "заметные осадки" in text
+    assert "обычно около 11,2 мм за сутки" in text
+    assert "по моделям 2,5–38,2 мм" in text
+    assert "медиана" not in text
     assert "СИЛЬНЫЕ ОСАДКИ" not in text
     assert "Сильный дождь" not in text
     assert "очень много осадков" not in text
