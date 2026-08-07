@@ -301,7 +301,10 @@ def test_report_is_risk_first_and_uses_graph_only_appendices(tmp_path: Path) -> 
     assert "Метеограмма модели ECMWF IFS" in xml
     assert "Метеограмма модели ICON" in xml
     assert "Метеограмма модели GDPS" in xml
-    assert "Ансамблевая метеограмма GEFS" in xml
+    assert "Метеограмма вариантов ансамбля GEFS" in xml
+    assert "медиана" not in xml
+    assert "процентиль" not in xml
+    assert "10–90" not in xml
     assert len(media) >= 4
 
 
